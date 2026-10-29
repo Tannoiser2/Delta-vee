@@ -1562,7 +1562,7 @@ func _shoot(side: int, r: Dictionary) -> bool:
 	var tv := target_value(u, src, t)
 	var ch := hit_chance(w, tv["tv"])
 	var srcname := "burster" if str(src) == "burst" else "modulo %d" % (int(src) + 1)
-	var desc := "%s (%s) spara %s a %s: gittata %d, vel. relativa %d%s → valore %d" % [
+	var desc := "%s (%s) spara %s a %s: gittata %d, vel. relativa %d%s = valore %d" % [
 		uname(u), srcname, D.FIRE[w]["art"], uname_for(t, side), tv["range"], tv["rv"],
 		(", puntamento %d" % tv["mod"]) if tv["mod"] != 0 else "", tv["tv"]]
 	if ch <= 0:

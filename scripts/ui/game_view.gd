@@ -44,6 +44,7 @@ var rp_btn: Button
 var _rp_drag := false
 var ended := false
 var hover_lbl: Label
+var _last_fire := {}
 
 
 func _ready() -> void:
@@ -675,6 +676,12 @@ func _on_decision(req: Dictionary) -> void:
 			var mine := _fire_units(int(req["seat"]))
 			if not mine.is_empty() and (sel == "" or not engine.fire_budget.has(sel)):
 				sel = mine[0]["id"]
+			# si riprende l'arma appena usata, se può sparare ancora
+			if _last_fire.get("sel", "") == sel and engine.units.has(sel):
+				var u: Dictionary = engine.units[sel]
+				var src = _last_fire["src"]
+				if engine.src_available(u, src) and _last_fire["w"] in engine.weapons_of(u, src) and engine.energy(u) >= engine.fire_cost(u, _last_fire["w"]):
+					aux = {"src": src, "w": _last_fire["w"], "t": ""}
 		"deploy":
 			plan = {"hex": {}, "dir": {}, "v": 0}
 			for s in req["ships"]:
@@ -832,7 +839,7 @@ func _build_cmd() -> void:
 	_unit_strip(units, func(u):
 		var o: Dictionary = plan["m"].get(u["id"], {})
 		var any: bool = int(o.get("a", 0)) != 0 or int(o.get("t", 0)) != 0 or o.get("w", null) != null or str(o.get("j", "")) != ""
-		return ("✔ " if any or _bc_used(u["id"]) > 0 else "") + u["label"])
+		return ("• " if any or _bc_used(u["id"]) > 0 else "") + u["label"])
 	if sel == "" or not engine.units.has(sel):
 		_cmd_footer()
 		return
@@ -854,12 +861,12 @@ func _cmd_maneuver(u: Dictionary) -> void:
 		var r := _row()
 		var j := int(u["jump"])
 		if j == 0:
-			var b := _btn("Prepara il salto" if str(o["j"]) != "prep" else "✔ Salto in preparazione (annulla)", func():
+			var b := _btn("Prepara il salto" if str(o["j"]) != "prep" else "• Salto in preparazione (annulla)", func():
 				o["j"] = "" if str(o["j"]) == "prep" else "prep"
 				_rebuild(), false, 0, r)
 			b.tooltip_text = "Si può saltare solo dalla mappa E (a destra della D) o da quelle sopra e sotto."
 		elif j == 1:
-			_btn("✔ Salta!" if str(o["j"]) == "jump" else "Salta!", func():
+			_btn("• Salta!" if str(o["j"]) == "jump" else "Salta!", func():
 				o["j"] = "jump"
 				_rebuild(), true, 0, r)
 			_btn("Annulla il salto", func():
@@ -926,7 +933,7 @@ func _cmd_maneuver(u: Dictionary) -> void:
 	var r2 := _row()
 	r2.add_child(UI.label("Direzione", 19, UI.TEXT, UI.font_semi))
 	var nd := posmod(int(u["dir"]) + t, 12)
-	var bl := _btn("↺", func():
+	var bl := _btn("←", func():
 		o["t"] = t - 1
 		_rebuild(), false, 54, r2)
 	bl.disabled = lim["single"] or (used >= n and t <= 0)
@@ -934,7 +941,7 @@ func _cmd_maneuver(u: Dictionary) -> void:
 	dl.custom_minimum_size.x = 150
 	dl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	r2.add_child(dl)
-	var br := _btn("↻", func():
+	var br := _btn("→", func():
 		o["t"] = t + 1
 		_rebuild(), false, 54, r2)
 	br.disabled = lim["single"] or (used >= n and t >= 0)
@@ -1089,7 +1096,7 @@ func _cmd_battle(u: Dictionary) -> void:
 			var tu: Dictionary = engine.units[aux["t"]]
 			_txt("Bersaglio: %s (vel. %d, ore %s)" % [engine.uname_for(tu, u["side"]), tu["v"], D.DIR_NAMES[tu["dir"]]], UI.TEXT, 17)
 			var r := _row()
-			for spec in [["−vel", "a", -1], ["+vel", "a", 1], ["↺", "tt", -1], ["↻", "tt", 1]]:
+			for spec in [["−vel", "a", -1], ["+vel", "a", 1], ["←", "tt", -1], ["→", "tt", 1]]:
 				var key: String = spec[1]
 				var dv: int = spec[2]
 				_btn(spec[0], func():
@@ -1175,7 +1182,7 @@ func _cmd_footer() -> void:
 		plan = {"m": {}, "b": []}
 		mode = ""
 		_rebuild(), false, 0, r)
-	_btn("Fine comandi ▶", func():
+	_btn("Fine comandi →", func():
 		var m := {}
 		for id in plan["m"]:
 			var o: Dictionary = plan["m"][id]
@@ -1350,7 +1357,7 @@ func _build_fire() -> void:
 		else:
 			status_lbl.text = "L'IA non sparerebbe altro."
 		_rebuild(), false, 0, r)
-	_btn("Fine fuoco ▶", func(): _submit({}), true, 0, r)
+	_btn("Fine fuoco →", func(): _submit({}), true, 0, r)
 
 
 func _fire_target_box(u: Dictionary) -> void:
@@ -1367,6 +1374,7 @@ func _fire_target_box(u: Dictionary) -> void:
 	var txt := "colpo impossibile" if ch <= 0 else ("colpo automatico" if ch >= 99 else "serve ≤%d sul d10 (%d%%)" % [ch, ch * 10])
 	_txt(txt, UI.YELLOW, 19, UI.font_bold)
 	var b := _btn("FUOCO!", func():
+		_last_fire = {"sel": u["id"], "src": aux["src"], "w": aux["w"]}
 		_submit({"s": u["id"], "src": aux["src"], "w": aux["w"], "t": tid}), true)
 	b.disabled = ch <= 0
 
@@ -1426,23 +1434,23 @@ func _build_deploy() -> void:
 			_rebuild(), aux.get("ship", "") == id, 0, r)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if s["dir_free"] and not group:
-			_btn("↺", func():
+			_btn("←", func():
 				plan["dir"][id] = posmod(int(plan["dir"][id]) - 1, 12)
 				_rebuild(), false, 44, r)
 			r.add_child(UI.label("ore %s" % D.DIR_NAMES[plan["dir"][id]], 18, UI.YELLOW))
-			_btn("↻", func():
+			_btn("→", func():
 				plan["dir"][id] = posmod(int(plan["dir"][id]) + 1, 12)
 				_rebuild(), false, 44, r)
 	if group:
 		var first: String = pending["ships"][0]["id"]
 		var r := _row()
 		r.add_child(UI.label("Direzione di tutte", 18))
-		_btn("↺", func():
+		_btn("←", func():
 			for s in pending["ships"]:
 				plan["dir"][s["id"]] = posmod(int(plan["dir"][first]) - 1, 12)
 			_rebuild(), false, 44, r)
 		r.add_child(UI.label("ore %s" % D.DIR_NAMES[plan["dir"][first]], 20, UI.YELLOW, UI.font_bold))
-		_btn("↻", func():
+		_btn("→", func():
 			for s in pending["ships"]:
 				plan["dir"][s["id"]] = posmod(int(plan["dir"][first]) + 1, 12)
 			_rebuild(), false, 44, r)
@@ -1457,7 +1465,7 @@ func _build_deploy() -> void:
 		_btn("+", func():
 			plan["v"] = mini(int(vr[1]), int(plan["v"]) + 1)
 			_rebuild(), false, 44, r)
-	_btn("Conferma lo schieramento ▶", func():
+	_btn("Conferma lo schieramento →", func():
 		_submit({"hex": plan["hex"], "dir": plan["dir"], "v": plan["v"]}), true)
 
 
@@ -1482,17 +1490,17 @@ func _build_planet() -> void:
 	if not lim["single"]:
 		var r2 := _row()
 		r2.add_child(UI.label("Direzione", 18))
-		_btn("↺", func():
+		_btn("←", func():
 			if absi(a) + absi(t - 1) <= int(lim["n"]):
 				plan["t"] = t - 1
 			_rebuild(), false, 50, r2)
 		r2.add_child(UI.label("ore %s" % D.DIR_NAMES[posmod(int(u["dir"]) + t, 12)], 22, UI.YELLOW, UI.font_bold))
-		_btn("↻", func():
+		_btn("→", func():
 			if absi(a) + absi(t + 1) <= int(lim["n"]):
 				plan["t"] = t + 1
 			_rebuild(), false, 50, r2)
 	_txt("Comandi usati: %d su %d" % [used, lim["n"]], UI.CYAN)
-	_btn("Conferma ▶", func(): _submit({"a": plan["a"], "t": plan["t"]}), true)
+	_btn("Conferma →", func(): _submit({"a": plan["a"], "t": plan["t"]}), true)
 
 
 func _build_hitpart() -> void:
@@ -1594,15 +1602,15 @@ func start_replay() -> void:
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 10)
 	replay_bar.add_child(hb)
-	var rw := UI.button("⏮", 54, 44, 20)
+	var rw := UI.button("«", 54, 44, 20)
 	rw.pressed.connect(func(): rp_time = 0.0)
 	hb.add_child(rw)
-	rp_btn = UI.button("⏸", 54, 44, 20)
+	rp_btn = UI.button("Pausa", 90, 44, 18)
 	rp_btn.pressed.connect(func():
 		rp_play = not rp_play
 		if rp_play and rp_time >= rp_starts[-1]:
 			rp_time = 0.0
-		rp_btn.text = "⏸" if rp_play else "▶")
+		rp_btn.text = "Pausa" if rp_play else "Avvia")
 	hb.add_child(rp_btn)
 	for sp in [0.5, 1.0, 2.0, 4.0]:
 		var s: float = sp
@@ -1644,7 +1652,7 @@ func _replay_step(dt: float) -> void:
 		if rp_time >= total:
 			rp_play = false
 			if is_instance_valid(rp_btn):
-				rp_btn.text = "▶"
+				rp_btn.text = "Avvia"
 	# segmento corrente
 	var i := rp_starts.bsearch(rp_time, true) - 1
 	i = clampi(i, 0, engine.history.size() - 1)

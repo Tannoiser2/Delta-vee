@@ -313,6 +313,8 @@ func _score_state(e: DVEngine, u: Dictionary, g: Dictionary, a: int, t: int, w, 
 			if dmin < 999:
 				var want := 6 if g.get("careful", false) else 2
 				score -= absf(dmin - want) * 0.6
+				# non perdere il contatto (nello scenario 2 a 25 esagoni è pareggio)
+				score -= maxf(0.0, dmin - 9) * 2.0
 			# troppo veloce = poche manovre
 			score -= maxf(0.0, st[2] - (e.mr(u) - 3)) * 0.8
 		"orbit":
