@@ -1,0 +1,10 @@
+{
+  "titolo": "DeltaVee",
+  "sottotitolo": "combattimento spaziale tattico per Universe",
+  "descrizione": "Il sistema di combattimento spaziale di SPI (1981) per il gioco di ruolo Universe: astronavi con moduli intercambiabili, movimento newtoniano su 12 direzioni, laser, particelle, missili guidati e intelligenti, caccia e campi di forza. Cinque scenari, IA, mappa 2D e tabellone 3D, partite online e replay finale.",
+  "online": true,
+  "sezione": "conversione",
+  "ordine": 190,
+  "bgg": 7982,
+  "generi": ["Fantascienza", "Wargame"]
+}

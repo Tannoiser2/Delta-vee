@@ -1,0 +1,859 @@
+extends SubViewportContainer
+## Il tabellone in 3D: le mappe esagonali stese nello spazio stellato, le pedine originali come
+## gettoni spessi e sopra ciascuna un modellino d'epoca (scafo bianco con le strisce del lato),
+## i missili, i pianeti e i campi di asteroidi. Si ruota trascinando, si sposta col tasto destro
+## (o Maiusc + trascina), si ingrandisce con la rotella. Le pedine coperte restano un segnale anonimo.
+
+signal hex_clicked(h: Vector2i)
+signal hex_hovered(h: Vector2i)
+
+const D = preload("res://scripts/data/dv_data.gd")
+const BW := 24.0                 # larghezza di un blocco di mappa (lato esagono = 1)
+const BH := 31.17691             # altezza: 18 × √3
+
+var eng: DVEngine
+var state := {"units": {}, "fx": [], "maps": {}}
+var viewer: Array = [0, 1]
+var ov := {}
+var vp: SubViewport
+var root3: Node3D
+var cam: Camera3D
+var target := Vector3(20, 0, 14)
+var yaw := 0.0
+var pitch := 0.95
+var dist := 38.0
+var _drag := 0
+var _from := Vector2.ZERO
+var _moved := false
+var _maps_key := ""
+var _map_nodes := {}
+var _tile_tex: Texture2D
+var _units := {}                 # id -> {node, token, model, vel, key}
+var _ov_mesh: MeshInstance3D
+var _fx_root: Node3D
+var _ov_dirty := true
+var hover := Vector2i(-999, -999)
+var _static_done := false
+
+
+func _ready() -> void:
+	stretch = true
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	vp = SubViewport.new()
+	vp.msaa_3d = Viewport.MSAA_2X
+	vp.handle_input_locally = false
+	vp.own_world_3d = true
+	add_child(vp)
+	root3 = Node3D.new()
+	vp.add_child(root3)
+	var env := WorldEnvironment.new()
+	var e := Environment.new()
+	e.background_mode = Environment.BG_SKY
+	var sky := Sky.new()
+	var pm := PanoramaSkyMaterial.new()
+	pm.panorama = _star_panorama()
+	sky.sky_material = pm
+	e.sky = sky
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(0.55, 0.55, 0.62)
+	e.ambient_light_energy = 0.8
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.glow_enabled = true
+	e.glow_intensity = 0.6
+	env.environment = e
+	root3.add_child(env)
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-55, -30, 0)
+	sun.light_energy = 1.25
+	sun.light_color = Color(1.0, 0.95, 0.88)
+	root3.add_child(sun)
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(-30, 150, 0)
+	fill.light_energy = 0.35
+	fill.light_color = Color(0.6, 0.75, 1.0)
+	root3.add_child(fill)
+	cam = Camera3D.new()
+	cam.fov = 45
+	cam.far = 800
+	root3.add_child(cam)
+	_ov_mesh = MeshInstance3D.new()
+	_ov_mesh.mesh = ImmediateMesh.new()
+	var om := StandardMaterial3D.new()
+	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	om.vertex_color_use_as_albedo = true
+	om.cull_mode = BaseMaterial3D.CULL_DISABLED
+	om.no_depth_test = false
+	_ov_mesh.material_override = om
+	root3.add_child(_ov_mesh)
+	_fx_root = Node3D.new()
+	root3.add_child(_fx_root)
+	_tile_tex = _make_tile()
+	_update_cam()
+
+
+func set_engine(e: DVEngine) -> void:
+	eng = e
+
+
+func set_state(st: Dictionary) -> void:
+	state = st
+	if not is_visible_in_tree():
+		return
+	var mk := str(st.get("maps", {}).keys())
+	if mk != _maps_key:
+		_maps_key = mk
+		_build_maps()
+	if not _static_done and eng != null:
+		_static_done = true
+		_build_static()
+	_sync_units()
+	_ov_dirty = true
+
+
+func redraw() -> void:
+	_ov_dirty = true
+
+
+func _process(_d: float) -> void:
+	if not is_visible_in_tree():
+		return
+	if _ov_dirty or not state.get("fx", []).is_empty():
+		_ov_dirty = false
+		_draw_overlay()
+		_draw_fx()
+
+
+# ---------------------------------------------------------------- camera
+
+func _update_cam() -> void:
+	var off := Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)) * dist
+	cam.position = target + off
+	cam.look_at(target, Vector3.UP)
+
+
+func fit() -> void:
+	var r := _bounds()
+	var ub := _units_bounds()
+	if ub.size.x > 0:
+		r = ub
+	target = Vector3(r.get_center().x, 0, r.get_center().y)
+	dist = clampf(maxf(r.size.x, r.size.y) * 0.95, 12.0, 160.0)
+	yaw = 0.0
+	pitch = 0.95
+	_update_cam()
+
+
+func _units_bounds() -> Rect2:
+	if eng == null:
+		return Rect2()
+	var r := Rect2()
+	var first := true
+	for id in eng.order:
+		var u: Dictionary = eng.units[id]
+		if u["st"] != "on":
+			continue
+		var p := Hex.center(u["hex"], 1.0)
+		r = Rect2(p, Vector2.ZERO) if first else r.expand(p)
+		first = false
+	if first:
+		return Rect2()
+	r = r.grow(4.0)
+	if r.size.x < 22:
+		r = r.grow_individual((22 - r.size.x) / 2, 0, (22 - r.size.x) / 2, 0)
+	return r
+
+
+func center_on(p: Vector2) -> void:
+	target = Vector3(p.x, 0, p.y)
+	_update_cam()
+
+
+func _bounds() -> Rect2:
+	var r := Rect2()
+	var first := true
+	for key in _maps():
+		var p: PackedStringArray = str(key).split(",")
+		var rr := Rect2(Vector2(int(p[0]) * BW - 0.75, int(p[1]) * BH - 0.87), Vector2(BW, BH))
+		r = rr if first else r.merge(rr)
+		first = false
+	return r
+
+
+func _maps() -> Dictionary:
+	var m: Dictionary = state.get("maps", {})
+	if m.is_empty() and eng != null:
+		m = eng.maps
+	return m
+
+
+func _gui_input(ev: InputEvent) -> void:
+	if ev is InputEventMouseButton:
+		if ev.button_index == MOUSE_BUTTON_WHEEL_UP and ev.pressed:
+			dist = clampf(dist / 1.12, 4.0, 220.0)
+			_update_cam()
+		elif ev.button_index == MOUSE_BUTTON_WHEEL_DOWN and ev.pressed:
+			dist = clampf(dist * 1.12, 4.0, 220.0)
+			_update_cam()
+		elif ev.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
+			if ev.pressed:
+				_drag = ev.button_index
+				if ev.button_index == MOUSE_BUTTON_LEFT and ev.shift_pressed:
+					_drag = MOUSE_BUTTON_RIGHT
+				_from = ev.position
+				_moved = false
+			else:
+				if _drag == MOUSE_BUTTON_LEFT and not _moved:
+					var h = _pick(ev.position)
+					if h != null:
+						hex_clicked.emit(h)
+				_drag = 0
+	elif ev is InputEventMouseMotion:
+		if _drag != 0:
+			if (ev.position - _from).length() > 6:
+				_moved = true
+			if _moved:
+				if _drag == MOUSE_BUTTON_LEFT:
+					yaw -= ev.relative.x * 0.006
+					pitch = clampf(pitch + ev.relative.y * 0.005, 0.25, 1.52)
+				else:
+					var right := cam.global_transform.basis.x
+					var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
+					target += (-right * ev.relative.x + fwd * ev.relative.y) * dist * 0.0016
+				_update_cam()
+		else:
+			var h = _pick(ev.position)
+			if h != null and h != hover:
+				hover = h
+				hex_hovered.emit(h)
+				_ov_dirty = true
+	elif ev is InputEventMagnifyGesture:
+		dist = clampf(dist / ev.factor, 4.0, 220.0)
+		_update_cam()
+
+
+func _pick(p: Vector2):
+	var sc := Vector2(vp.size) / size if size.x > 0 else Vector2.ONE
+	var pp := p * sc
+	var o := cam.project_ray_origin(pp)
+	var d := cam.project_ray_normal(pp)
+	if absf(d.y) < 0.0001:
+		return null
+	var t := -o.y / d.y
+	if t < 0:
+		return null
+	var w := o + d * t
+	return Hex.at(Vector2(w.x, w.z), 1.0)
+
+
+# ---------------------------------------------------------------- mappe
+
+func _star_panorama() -> Texture2D:
+	var img := Image.create(2048, 1024, false, Image.FORMAT_RGB8)
+	img.fill(Color(0.012, 0.012, 0.02))
+	var r := RandomNumberGenerator.new()
+	r.seed = 1981
+	for i in 2600:
+		var x := r.randi_range(0, 2047)
+		var y := r.randi_range(0, 1023)
+		var b := r.randf_range(0.25, 1.0)
+		var c := Color(b, b, b * r.randf_range(0.85, 1.0))
+		img.set_pixel(x, y, c)
+		if b > 0.9:
+			for dd in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var q: Vector2i = Vector2i(x, y) + dd
+				if q.x >= 0 and q.x < 2048 and q.y >= 0 and q.y < 1024:
+					img.set_pixel(q.x, q.y, c * 0.5)
+	# una nebulosa rosata come sulla copertina
+	for i in 900:
+		var x := int(1400 + r.randfn(0, 180))
+		var y := int(380 + r.randfn(0, 90))
+		if x >= 0 and x < 2048 and y >= 0 and y < 1024:
+			var c := img.get_pixel(x, y)
+			img.set_pixel(x, y, c + Color(0.05, 0.015, 0.035))
+	return ImageTexture.create_from_image(img)
+
+
+## un blocco di mappa disegnato una volta in una texture periodica (le mappe sono tutte uguali)
+func _make_tile() -> Texture2D:
+	var tv := SubViewport.new()
+	var px := 1536
+	tv.size = Vector2i(px, int(px * BH / BW))
+	tv.transparent_bg = false
+	tv.render_target_update_mode = SubViewport.UPDATE_ONCE
+	tv.disable_3d = true
+	vp.add_child(tv)
+	var n := TileDraw.new()
+	n.k = px / BW
+	tv.add_child(n)
+	return tv.get_texture()
+
+
+class TileDraw extends Node2D:
+	var k := 64.0
+
+	func _draw() -> void:
+		UI.init_fonts()
+		var w := 24.0 * k
+		var h := 31.17691 * k
+		draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.02, 0.025))
+		var o := Vector2(0.75, 0.866) * k
+		var col := Color(UI.HEX, 0.95)
+		for q in range(-1, 17):
+			for r in range(-1, 19):
+				var hh := Vector2i(q, r)
+				var c := Hex.center(hh, k) + o
+				var pts := Hex.corners(c, k)
+				pts.append(pts[0])
+				draw_polyline(pts, col, 3.0)
+				var qq := posmod(q, 16)
+				var rr := posmod(r, 18)
+				draw_string(UI.font_mono, c + Vector2(-k * 0.42, -k * 0.48), "%02d%02d" % [qq + 1, rr + 1], HORIZONTAL_ALIGNMENT_LEFT, -1, int(k * 0.3), col)
+		var cc := Hex.center(Vector2i(8, 8), k) + o
+		var logo := "DeltaVee"
+		var fs := int(k * 2.1)
+		var lw := UI.font_title.get_string_size(logo, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string(UI.font_title, cc + Vector2(-lw / 2, -k * 1.6), logo, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.85, 0.83, 0.8, 0.5))
+		for d in 12:
+			var v := Hex.dir_vec(d)
+			var c2 := cc + Vector2(0, k * 1.2)
+			draw_line(c2 + v * k * 0.55, c2 + v * k * (1.9 if d % 2 == 0 else 1.25), Color(1, 1, 1, 0.45), 4.0 if d % 2 == 0 else 2.5)
+
+
+func _build_maps() -> void:
+	for k in _map_nodes:
+		_map_nodes[k].queue_free()
+	_map_nodes = {}
+	var mp := _maps()
+	for key in mp:
+		var p: PackedStringArray = str(key).split(",")
+		var bx := int(p[0])
+		var by := int(p[1])
+		var mi := MeshInstance3D.new()
+		var pl := PlaneMesh.new()
+		pl.size = Vector2(BW, BH)
+		mi.mesh = pl
+		var m := StandardMaterial3D.new()
+		m.albedo_texture = _tile_tex
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		mi.material_override = m
+		mi.position = Vector3(bx * BW - 0.75 + BW / 2, -0.02, by * BH - 0.866 + BH / 2)
+		root3.add_child(mi)
+		var lb := Label3D.new()
+		lb.text = str(mp[key])
+		lb.font = UI.font_title
+		lb.font_size = 256
+		lb.pixel_size = 0.012
+		lb.modulate = Color(UI.YELLOW, 0.22)
+		lb.outline_size = 0
+		lb.rotation_degrees = Vector3(-90, 0, 0)
+		mi.add_child(lb)
+		lb.position = Vector3(-BW / 2 + 2.3, 0.02, -BH / 2 + 3.2)
+		_map_nodes[key] = mi
+
+
+func _build_static() -> void:
+	for h in eng.planets:
+		var c := Hex.center(h, 1.0)
+		var sp := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.75
+		sm.height = 1.5
+		sp.mesh = sm
+		var mat := StandardMaterial3D.new()
+		mat.albedo_texture = UI.tex("res://assets/markers/pianeta.png")
+		mat.uv1_scale = Vector3(1.6, 1, 1)
+		mat.albedo_color = Color(0.75, 0.85, 1.0)
+		mat.emission_enabled = true
+		mat.emission = Color(0.1, 0.2, 0.4)
+		sp.material_override = mat
+		sp.position = Vector3(c.x, 0.9, c.y)
+		root3.add_child(sp)
+		var atm := MeshInstance3D.new()
+		var am := SphereMesh.new()
+		am.radius = 0.86
+		am.height = 1.72
+		atm.mesh = am
+		var amat := StandardMaterial3D.new()
+		amat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		amat.albedo_color = Color(0.4, 0.7, 1.0, 0.18)
+		amat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		atm.material_override = amat
+		sp.add_child(atm)
+		var lb := Label3D.new()
+		lb.text = eng.sc.get("planet_name", "")
+		lb.font = UI.font_bold
+		lb.font_size = 64
+		lb.pixel_size = 0.01
+		lb.modulate = UI.CYAN
+		lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lb.position = Vector3(0, 1.2, 0)
+		sp.add_child(lb)
+	var rr := RandomNumberGenerator.new()
+	rr.seed = 7
+	var rock := StandardMaterial3D.new()
+	rock.albedo_color = Color(0.55, 0.5, 0.45)
+	rock.roughness = 1.0
+	for h in eng.asteroids:
+		var c := Hex.center(h, 1.0)
+		for i in 5:
+			var mi := MeshInstance3D.new()
+			var sm := SphereMesh.new()
+			var rad := rr.randf_range(0.07, 0.2)
+			sm.radius = rad
+			sm.height = rad * 2
+			sm.radial_segments = 6
+			sm.rings = 3
+			mi.mesh = sm
+			mi.material_override = rock
+			mi.scale = Vector3(1.0, rr.randf_range(0.6, 1.0), rr.randf_range(0.7, 1.3))
+			mi.rotation = Vector3(rr.randf() * 3, rr.randf() * 3, rr.randf() * 3)
+			mi.position = Vector3(c.x + rr.randf_range(-0.6, 0.6), rr.randf_range(0.2, 0.9), c.y + rr.randf_range(-0.55, 0.55))
+			root3.add_child(mi)
+
+
+# ---------------------------------------------------------------- pedine e modellini
+
+func _mat(col: Color, metal := 0.3, rough := 0.45) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = col
+	m.metallic = metal
+	m.roughness = rough
+	return m
+
+
+func _part(parent: Node3D, mesh: Mesh, mat: Material, pos: Vector3, rot := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.position = pos
+	mi.rotation_degrees = rot
+	mi.scale = scl
+	parent.add_child(mi)
+	return mi
+
+
+func _cyl(r: float, h: float, top := -1.0) -> CylinderMesh:
+	var c := CylinderMesh.new()
+	c.top_radius = r if top < 0 else top
+	c.bottom_radius = r
+	c.height = h
+	c.radial_segments = 12
+	return c
+
+
+func _box(x: float, y: float, z: float) -> BoxMesh:
+	var b := BoxMesh.new()
+	b.size = Vector3(x, y, z)
+	return b
+
+
+## modellino d'epoca: scafo bianco, muso rosso come sulla copertina, strisce del colore del lato.
+## La prua punta verso +x.
+func _model(kind: String, cls: String, side: int) -> Node3D:
+	var n := Node3D.new()
+	var hull := _mat(Color(0.88, 0.9, 0.95), 0.25, 0.35)
+	var stripe := _mat(UI.SIDE[side], 0.1, 0.5)
+	var nose := _mat(Color(0.75, 0.12, 0.1), 0.2, 0.4)
+	var glass := _mat(Color(0.3, 0.85, 0.75), 0.0, 0.1)
+	glass.emission_enabled = true
+	glass.emission = Color(0.1, 0.5, 0.4)
+	var flame := StandardMaterial3D.new()
+	flame.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flame.albedo_color = Color(1.0, 0.75, 0.9)
+	flame.emission_enabled = true
+	flame.emission = Color(1.0, 0.5, 0.8)
+	match kind:
+		"mis":
+			var body := _part(n, _cyl(0.05, 0.42), _mat(Color(0.8, 0.8, 0.82)), Vector3.ZERO, Vector3(0, 0, 90))
+			_part(n, _cyl(0.05, 0.12, 0.0), stripe, Vector3(0.27, 0, 0), Vector3(0, 0, -90))
+			for k in 4:
+				_part(n, _box(0.1, 0.01, 0.16), stripe, Vector3(-0.17, 0, 0), Vector3(k * 45.0, 0, 0))
+			_part(n, SphereMesh.new(), flame, Vector3(-0.25, 0, 0), Vector3.ZERO, Vector3(0.08, 0.06, 0.06))
+			if cls == "m":
+				body.scale = Vector3(1.6, 1.0, 1.6)
+		"bc":
+			_part(n, _cyl(0.07, 0.5, 0.03), hull, Vector3.ZERO, Vector3(0, 0, -90))
+			_part(n, _box(0.22, 0.02, 0.5), stripe, Vector3(-0.08, 0, 0))
+			_part(n, SphereMesh.new(), glass, Vector3(0.05, 0.05, 0), Vector3.ZERO, Vector3(0.12, 0.07, 0.07))
+			_part(n, SphereMesh.new(), flame, Vector3(-0.27, 0, 0), Vector3.ZERO, Vector3(0.07, 0.05, 0.05))
+		_:
+			var npods: int = int(D.SHIPS.get(cls, {}).get("pods", 4))
+			var big: bool = npods >= 7
+			var L := 0.75 + npods * 0.035
+			var R := 0.11 + npods * 0.008
+			var civil: bool = cls in ["Gamma", "Zeta", "Iota", "Mu"]
+			# fusoliera
+			_part(n, _cyl(R, L * 0.75), hull, Vector3(-L * 0.05, 0, 0), Vector3(0, 0, 90))
+			_part(n, _cyl(R, L * 0.22, 0.0), nose, Vector3(L * 0.43, 0, 0), Vector3(0, 0, -90))
+			_part(n, _cyl(R * 1.02, 0.05), stripe, Vector3(L * 0.15, 0, 0), Vector3(0, 0, 90))
+			_part(n, _cyl(R * 1.02, 0.05), stripe, Vector3(-L * 0.25, 0, 0), Vector3(0, 0, 90))
+			_part(n, SphereMesh.new(), glass, Vector3(L * 0.22, R * 0.75, 0), Vector3.ZERO, Vector3(0.22, 0.1, 0.12) * (1.0 + npods * 0.03))
+			# moduli: gondole laterali
+			var side_pods := mini(npods, 6) if not civil else 0
+			for i in side_pods:
+				var zz := (0.32 + (i / 2) * 0.12) * (1 if i % 2 == 0 else -1)
+				var xx := -L * 0.12 - (i / 2) * 0.16
+				_part(n, _box(0.08, 0.03, absf(zz)), hull, Vector3(xx, 0, zz * 0.5))
+				_part(n, _cyl(0.07, L * 0.42), hull, Vector3(xx, 0, zz), Vector3(0, 0, 90))
+				_part(n, _cyl(0.072, 0.04), stripe, Vector3(xx + 0.06, 0, zz), Vector3(0, 0, 90))
+				_part(n, SphereMesh.new(), flame, Vector3(xx - L * 0.22, 0, zz), Vector3.ZERO, Vector3(0.09, 0.07, 0.07))
+			if civil:
+				# mercantili Corco: container in fila sotto lo scafo
+				for i in mini(npods, 12):
+					var row := i / 2
+					var zz := 0.2 * (1 if i % 2 == 0 else -1)
+					_part(n, _box(0.16, 0.14, 0.16), stripe if i % 3 == 0 else hull, Vector3(L * 0.15 - row * 0.18, -0.02, zz))
+			# motore principale
+			_part(n, _cyl(R * 0.7, 0.1, R * 0.5), _mat(Color(0.35, 0.35, 0.38)), Vector3(-L * 0.45, 0, 0), Vector3(0, 0, 90))
+			_part(n, SphereMesh.new(), flame, Vector3(-L * 0.53, 0, 0), Vector3.ZERO, Vector3(0.14, 0.1, 0.1) * (1.4 if big else 1.0))
+	return n
+
+
+func _sync_units() -> void:
+	var units: Dictionary = state.get("units", {})
+	for id in _units.keys():
+		if not units.has(id):
+			_units[id]["node"].queue_free()
+			_units.erase(id)
+	# pile: le pedine nello stesso esagono si sovrappongono un po' più in alto
+	var stacks := {}
+	for id in units:
+		var u: Dictionary = units[id]
+		if int(u["f"]) & 8:
+			continue
+		var k: Vector2i = u["h"]
+		stacks[k] = stacks.get(k, 0) + 1
+	var seen := {}
+	for id in units:
+		var u: Dictionary = units[id]
+		var r: Dictionary = eng.reg.get(id, {})
+		if r.is_empty():
+			continue
+		var f := int(u["f"])
+		var side: int = r["side"]
+		var hidden: bool = not (f & 1) and not side in viewer
+		var key := "%s|%s|%s" % [hidden, (f & 2) != 0, (f & 8) != 0]
+		var e: Dictionary = _units.get(id, {})
+		if e.is_empty() or e["key"] != key:
+			if not e.is_empty():
+				e["node"].queue_free()
+			e = _make_unit(id, r, hidden, (f & 2) != 0, (f & 8) != 0)
+			e["key"] = key
+			_units[id] = e
+		var node: Node3D = e["node"]
+		var hk: Vector2i = u["h"]
+		var idx: int = seen.get(hk, 0)
+		if not (f & 8):
+			seen[hk] = idx + 1
+		var lift := idx * 0.1
+		var p: Vector2 = u["p"]
+		var off := Vector2(idx, -idx) * 0.12 if stacks.get(hk, 1) > 1 else Vector2.ZERO
+		if f & 8:
+			off = Vector2(-0.3, 0.3)
+			lift = 0.16
+		node.position = Vector3(p.x + off.x, lift, p.y + off.y)
+		node.rotation = Vector3(0, -float(u["a"]), 0)
+		var al: float = u.get("al", 1.0)
+		node.visible = al > 0.05
+		if e.has("model") and e["model"] != null:
+			e["model"].scale = Vector3.ONE * clampf(al, 0.05, 1.0) * float(e["model"].get_meta("base", 1.0))
+			e["model"].position.y = 0.55 + lift * 0.5 + sin(Time.get_ticks_msec() * 0.002 + p.x) * 0.03
+		if e.has("vel"):
+			e["vel"].text = str(u["v"])
+		if e.has("ff"):
+			e["ff"].visible = (f & 2) != 0
+
+
+func _make_unit(id: String, r: Dictionary, hidden: bool, ffon: bool, prepared: bool) -> Dictionary:
+	var node := Node3D.new()
+	root3.add_child(node)
+	var kind: String = r["kind"]
+	var side: int = r["side"]
+	var sz := 0.92 if kind == "ship" else 0.74
+	if prepared:
+		sz *= 0.5
+	# gettone: bordo nero e faccia con la pedina originale
+	var token := MeshInstance3D.new()
+	token.mesh = _box(sz, 0.08, sz)
+	token.material_override = _mat(Color(0.08, 0.08, 0.08), 0.0, 0.8)
+	token.position.y = 0.04
+	node.add_child(token)
+	var face := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(sz * 0.98, sz * 0.98)
+	face.mesh = pm
+	var fm := StandardMaterial3D.new()
+	fm.albedo_texture = UI.counter_tex(side, kind, r["cls"], r["label"], hidden or (kind == "ship" and ffon))
+	fm.roughness = 0.7
+	fm.uv1_scale = Vector3(1, -1, 1)
+	fm.uv1_offset = Vector3(0, 1, 0)
+	fm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	face.material_override = fm
+	face.position.y = 0.081
+	node.add_child(face)
+	var out := {"node": node, "model": null}
+	if prepared:
+		return out
+	if not hidden:
+		var m := _model(kind, r["cls"], side)
+		m.position.y = 0.55
+		m.set_meta("base", 1.5 if kind == "ship" else 1.35)
+		node.add_child(m)
+		out["model"] = m
+		# asta trasparente fra gettone e modellino
+		var stick := MeshInstance3D.new()
+		stick.mesh = _cyl(0.012, 0.5)
+		var sm := StandardMaterial3D.new()
+		sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		sm.albedo_color = Color(0.8, 0.9, 1.0, 0.35)
+		stick.material_override = sm
+		stick.position.y = 0.33
+		node.add_child(stick)
+	else:
+		var blip := MeshInstance3D.new()
+		var sp := SphereMesh.new()
+		sp.radius = 0.12
+		sp.height = 0.24
+		blip.mesh = sp
+		var bm := StandardMaterial3D.new()
+		bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bm.albedo_color = Color(UI.SIDE[side], 0.9)
+		bm.emission_enabled = true
+		bm.emission = UI.SIDE[side]
+		blip.material_override = bm
+		blip.position.y = 0.4
+		node.add_child(blip)
+	# segnalino di velocità
+	var vel := Label3D.new()
+	vel.font = UI.font_bold
+	vel.font_size = 72
+	vel.pixel_size = 0.005
+	vel.outline_size = 14
+	vel.outline_modulate = Color(0, 0, 0)
+	vel.modulate = Color(1, 1, 1)
+	vel.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	vel.position = Vector3(0, 0.95 if kind == "ship" else 0.7, 0)
+	vel.no_depth_test = true
+	node.add_child(vel)
+	out["vel"] = vel
+	if kind == "ship":
+		var ff := MeshInstance3D.new()
+		var fsp := SphereMesh.new()
+		fsp.radius = 0.62
+		fsp.height = 1.24
+		ff.mesh = fsp
+		var ffm := StandardMaterial3D.new()
+		ffm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		ffm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ffm.albedo_color = Color(UI.CYAN, 0.16)
+		ffm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		ff.material_override = ffm
+		ff.position.y = 0.5
+		ff.visible = ffon
+		node.add_child(ff)
+		out["ff"] = ff
+	return out
+
+
+# ---------------------------------------------------------------- sovrapposizioni ed effetti
+
+func _hex_fill(im: ImmediateMesh, h: Vector2i, col: Color, y := 0.03, scl := 0.92) -> void:
+	var c := Hex.center(h, 1.0)
+	var pts := Hex.corners(c, scl)
+	for i in 6:
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[(i + 1) % 6]
+		im.surface_set_color(col)
+		im.surface_add_vertex(Vector3(c.x, y, c.y))
+		im.surface_add_vertex(Vector3(a.x, y, a.y))
+		im.surface_add_vertex(Vector3(b.x, y, b.y))
+
+
+func _seg(im: ImmediateMesh, a: Vector2, b: Vector2, col: Color, w := 0.06, y := 0.05) -> void:
+	var d := (b - a)
+	if d.length() < 0.001:
+		return
+	var n := d.orthogonal().normalized() * w * 0.5
+	var p := [a + n, a - n, b - n, b + n]
+	im.surface_set_color(col)
+	im.surface_add_vertex(Vector3(p[0].x, y, p[0].y))
+	im.surface_add_vertex(Vector3(p[1].x, y, p[1].y))
+	im.surface_add_vertex(Vector3(p[2].x, y, p[2].y))
+	im.surface_add_vertex(Vector3(p[0].x, y, p[0].y))
+	im.surface_add_vertex(Vector3(p[2].x, y, p[2].y))
+	im.surface_add_vertex(Vector3(p[3].x, y, p[3].y))
+
+
+func _arrow3(im: ImmediateMesh, c: Vector2, ang: float, l: float, col: Color) -> void:
+	var v := Vector2(cos(ang), sin(ang))
+	var nn := Vector2(-v.y, v.x)
+	_seg(im, c - v * l * 0.5, c + v * l * 0.2, col, 0.07)
+	var tip := c + v * l * 0.5
+	var b1 := c + v * l * 0.15 + nn * l * 0.22
+	var b2 := c + v * l * 0.15 - nn * l * 0.22
+	im.surface_set_color(col)
+	im.surface_add_vertex(Vector3(tip.x, 0.06, tip.y))
+	im.surface_add_vertex(Vector3(b1.x, 0.06, b1.y))
+	im.surface_add_vertex(Vector3(b2.x, 0.06, b2.y))
+
+
+func _draw_overlay() -> void:
+	var im: ImmediateMesh = _ov_mesh.mesh
+	im.clear_surfaces()
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var any := false
+	# un triangolo invisibile perché la superficie non resti vuota
+	im.surface_set_color(Color(0, 0, 0, 0))
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_add_vertex(Vector3(0.001, 0, 0))
+	im.surface_add_vertex(Vector3(0, 0, 0.001))
+	for h in ov.get("hl", {}):
+		_hex_fill(im, h, Color(ov["hl"][h], 0.35))
+		any = true
+	if hover.x > -999:
+		_hex_fill(im, hover, Color(UI.YELLOW, 0.12), 0.025, 1.0)
+	for pth in ov.get("paths", []):
+		var col: Color = pth.get("col", UI.YELLOW)
+		var prev := Hex.center(pth["from"], 1.0)
+		for h in pth["hexes"]:
+			var c := Hex.center(h, 1.0)
+			_seg(im, prev, c, Color(col, 0.85), 0.08)
+			_hex_fill(im, h, Color(col, 0.18), 0.035, 0.25)
+			prev = c
+		if pth.has("ghost"):
+			var g: Dictionary = pth["ghost"]
+			_arrow3(im, Hex.center(g["hex"], 1.0), Hex.dir_angle(g["dir"]), 0.7, col)
+	for ar in ov.get("arrows", []):
+		var c := Hex.center(ar[0], 1.0)
+		for d in ar[1]:
+			var sel: bool = ar.size() > 2 and int(ar[2]) == int(d)
+			_arrow3(im, c + Hex.dir_vec(d) * 0.25, Hex.dir_angle(d), 0.5, UI.YELLOW if sel else UI.CYAN)
+	var units: Dictionary = state.get("units", {})
+	var sel: String = ov.get("sel", "")
+	if units.has(sel):
+		var p: Vector2 = units[sel]["p"]
+		for i in 24:
+			var a0 := TAU * i / 24.0
+			var a1 := TAU * (i + 1) / 24.0
+			_seg(im, p + Vector2(cos(a0), sin(a0)) * 0.62, p + Vector2(cos(a1), sin(a1)) * 0.62, UI.YELLOW, 0.06, 0.1)
+	for id in ov.get("targets", {}):
+		if units.has(id):
+			var p: Vector2 = units[id]["p"]
+			for i in 24:
+				var a0 := TAU * i / 24.0
+				var a1 := TAU * (i + 1) / 24.0
+				_seg(im, p + Vector2(cos(a0), sin(a0)) * 0.6, p + Vector2(cos(a1), sin(a1)) * 0.6, UI.RED, 0.07, 0.1)
+	im.surface_end()
+	_labels()
+
+
+var _label_nodes: Array = []
+
+func _labels() -> void:
+	for n in _label_nodes:
+		n.queue_free()
+	_label_nodes = []
+	var units: Dictionary = state.get("units", {})
+	var items := []
+	for id in ov.get("targets", {}):
+		if units.has(id):
+			var p: Vector2 = units[id]["p"]
+			items.append([Vector3(p.x, 1.45, p.y), ov["targets"][id]])
+	for h in ov.get("labels", {}):
+		var c := Hex.center(h, 1.0)
+		items.append([Vector3(c.x, 0.4, c.y + 0.5), ov["labels"][h]])
+	for it in items:
+		var lb := Label3D.new()
+		lb.text = it[1]
+		lb.font = UI.font_bold
+		lb.font_size = 56
+		lb.pixel_size = 0.006
+		lb.modulate = UI.YELLOW
+		lb.outline_size = 12
+		lb.outline_modulate = Color(0, 0, 0)
+		lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lb.no_depth_test = true
+		lb.position = it[0]
+		root3.add_child(lb)
+		_label_nodes.append(lb)
+
+
+var _fx_nodes: Array = []
+
+func _draw_fx() -> void:
+	for n in _fx_nodes:
+		n.queue_free()
+	_fx_nodes = []
+	for f in state.get("fx", []):
+		var t: float = f.get("t", 0.0)
+		if t < 0.0 or t > 1.0:
+			continue
+		match f["k"]:
+			"beam":
+				var a: Vector2 = f["a"]
+				var b: Vector2 = f["b"]
+				if not f["hit"]:
+					b = b + (b - a).orthogonal().normalized() * 0.6
+				var k := clampf(t / 0.35, 0.0, 1.0)
+				var tip := a.lerp(b, k)
+				var col := UI.CYAN if str(f["w"]).begins_with("p") else Color(1.0, 0.25, 0.2)
+				var beam := MeshInstance3D.new()
+				var len := (tip - a).length()
+				if len < 0.01:
+					continue
+				beam.mesh = _cyl(0.035, len)
+				var m := StandardMaterial3D.new()
+				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				m.albedo_color = col
+				m.emission_enabled = true
+				m.emission = col
+				m.emission_energy_multiplier = 3.0
+				beam.material_override = m
+				var mid := (a + tip) * 0.5
+				beam.position = Vector3(mid.x, 0.6, mid.y)
+				var dir3 := Vector3(tip.x - a.x, 0, tip.y - a.y).normalized()
+				beam.basis = Basis(Quaternion(Vector3.UP, dir3))
+				root3.add_child(beam)
+				_fx_nodes.append(beam)
+				if f["hit"] and k >= 1.0:
+					_flash(Vector3(b.x, 0.6, b.y), 0.35 + t * 0.4, Color(1.0, 0.9, 0.5), 1.0 - t)
+			"boom":
+				var c: Vector2 = f["p"]
+				_flash(Vector3(c.x, 0.55, c.y), 0.3 + t * 1.3, Color(1.0, 0.55, 0.15), 1.0 - t)
+				_flash(Vector3(c.x, 0.55, c.y), 0.2 + t * 0.7, Color(1.0, 0.95, 0.6), 1.0 - t)
+			"spark":
+				var c: Vector2 = f["p"]
+				_flash(Vector3(c.x, 0.55, c.y), 0.2 + t * 0.5, UI.CYAN, (1.0 - t) * 0.6)
+			"warp":
+				var c: Vector2 = f["p"]
+				_flash(Vector3(c.x, 0.55, c.y), 0.3 + t * 2.0, Color(0.7, 0.85, 1.0), (1.0 - t) * 0.7)
+			"puff":
+				var c: Vector2 = f["p"]
+				_flash(Vector3(c.x, 0.5, c.y), 0.3 + t * 0.4, Color(1, 1, 1), (1.0 - t) * 0.4)
+
+
+func _flash(p: Vector3, r: float, col: Color, al: float) -> void:
+	var mi := MeshInstance3D.new()
+	var sp := SphereMesh.new()
+	sp.radius = r
+	sp.height = r * 2
+	sp.radial_segments = 16
+	sp.rings = 8
+	mi.mesh = sp
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(col, clampf(al, 0.0, 1.0) * 0.7)
+	mi.material_override = m
+	mi.position = p
+	root3.add_child(mi)
+	_fx_nodes.append(mi)
+	var l := OmniLight3D.new()
+	l.light_color = col
+	l.light_energy = 3.0 * al
+	l.omni_range = 3.0
+	l.position = p
+	root3.add_child(l)
+	_fx_nodes.append(l)
