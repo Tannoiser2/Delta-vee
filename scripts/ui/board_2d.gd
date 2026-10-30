@@ -79,8 +79,8 @@ func world_bounds() -> Rect2:
 
 
 ## inquadra le unità in gioco (con un po' di margine), oppure tutte le mappe
-func fit() -> void:
-	var r := units_bounds()
+func fit(all_maps := false) -> void:
+	var r := units_bounds() if not all_maps else Rect2()
 	if r.size.x <= 0:
 		r = world_bounds()
 	if r.size.x <= 0 or size.x <= 0:
@@ -186,6 +186,8 @@ class GridLayer extends Node2D:
 			var p: PackedStringArray = str(key).split(",")
 			var bx := int(p[0])
 			var by := int(p[1])
+			var o0 := Hex.center(Vector2i(bx * 16, by * 18), S) - Vector2(S * 0.75, S * 0.87)
+			draw_rect(Rect2(o0, Vector2(S * 24.0, S * 31.177)), Color(0.01, 0.01, 0.03, 0.72))
 			# logo e bussola al centro della mappa, come sul tabellone
 			var c := Hex.center(Vector2i(bx * 16 + 8, by * 18 + 8), S)
 			_compass(c + Vector2(0, S * 1.2), S)
@@ -400,26 +402,9 @@ class UnitLayer extends Node2D:
 			return
 		match f["k"]:
 			"beam":
-				var a: Vector2 = f["a"] * S
-				var b: Vector2 = f["b"] * S
-				var particle: bool = str(f["w"]).begins_with("p")
-				var col := UI.CYAN if particle else Color("#ff3b2f")
-				var hit: bool = f["hit"]
-				var end := b if hit else b + (b - a).orthogonal().normalized() * S * 0.6
-				var k := clampf(t / 0.35, 0.0, 1.0)
-				var tip := a.lerp(end, k)
-				var al := 1.0 if t < 0.7 else (1.0 - t) / 0.3
-				draw_line(a, tip, Color(col, 0.35 * al), 10.0)
-				draw_line(a, tip, Color(1, 1, 1, 0.9 * al), 3.0)
-				if hit and k >= 1.0:
-					draw_circle(b, S * 0.45 * (1.0 + (t - 0.35)), Color(UI.YELLOW, 0.5 * al))
+				FX2D.shot(self, f["a"] * S, f["b"] * S, str(f["w"]), bool(f["hit"]), t, S)
 			"boom":
-				var c: Vector2 = f["p"] * S
-				draw_circle(c, S * (0.3 + 1.4 * t), Color(UI.ORANGE, 0.55 * (1.0 - t)))
-				draw_circle(c, S * (0.2 + 0.8 * t), Color(UI.YELLOW_L, 0.8 * (1.0 - t)))
-				for i in 10:
-					var v := Hex.dir_vec(i + 1) * S * (0.4 + 1.6 * t)
-					draw_line(c + v * 0.6, c + v, Color(UI.YELLOW, 1.0 - t), 2.0)
+				FX2D.boom(self, f["p"] * S, t, S)
 			"spark":
 				var c: Vector2 = f["p"] * S
 				draw_arc(c, S * (0.3 + 0.6 * t), 0, TAU, 24, Color(UI.CYAN, 1.0 - t), 2.0)

@@ -14,8 +14,10 @@ static func duration(seg: Dictionary) -> float:
 		"move":
 			return 0.35 + 0.16 * int(seg.get("steps", 0))
 		"fire":
-			return 0.7
-		"boom", "launch", "jump":
+			return 1.0
+		"boom":
+			return 1.0
+		"launch", "jump":
 			return 0.5
 		"cmd":
 			return 0.35
@@ -100,7 +102,7 @@ static func state_at(hist: Array, i: int, t: float, reg: Dictionary) -> Dictiona
 		for ev in seg.get("ev", []):
 			var st: float = float(ev.get("step", 0)) / steps
 			if ev["k"] == "boom":
-				fx.append({"k": "boom", "p": pos_of(ev["at"]), "t": (t - st) / 0.35})
+				fx.append({"k": "boom", "p": pos_of(ev["at"]), "t": (t - st) / 0.5})
 			elif ev["k"] == "miss":
 				fx.append({"k": "spark", "p": pos_of(ev["at"]), "t": (t - st) / 0.3})
 	else:

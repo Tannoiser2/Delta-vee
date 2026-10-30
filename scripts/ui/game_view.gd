@@ -42,6 +42,7 @@ var rp_slider: HSlider
 var rp_lbl: Label
 var rp_btn: Button
 var _rp_drag := false
+var rp_track: ReplayTrack
 var ended := false
 var hover_lbl: Label
 var _last_fire := {}
@@ -117,7 +118,7 @@ func _build() -> void:
 		b.hex_hovered.connect(_on_hover)
 	# diario in basso
 	var lp := PanelContainer.new()
-	var ls := UI.panel_style(Color(0, 0, 0, 0.72), Color(UI.HEX_D, 0.6), 1, 4)
+	var ls := UI.panel_style(Color(0.02, 0.03, 0.08, 0.8), Color(UI.METAL_D, 0.8), 1, 4)
 	ls.set_content_margin_all(8)
 	lp.add_theme_stylebox_override("panel", ls)
 	lp.anchor_top = 1.0
@@ -146,7 +147,7 @@ func _build() -> void:
 	board_area.add_child(hover_lbl)
 	# barra in alto
 	var top := PanelContainer.new()
-	var ts := UI.panel_style(Color("#0d0c11"), UI.HEX, 0, 0)
+	var ts := UI.panel_style(Color("#0a1024"), UI.METAL, 0, 0)
 	ts.border_width_bottom = 2
 	ts.set_content_margin_all(6)
 	ts.content_margin_left = 14
@@ -187,7 +188,7 @@ func _build() -> void:
 	hb.add_child(bm)
 	# pannello a destra
 	var rp := PanelContainer.new()
-	var rs := UI.panel_style(Color("#0f0e14"), UI.HEX, 0, 0)
+	var rs := UI.panel_style(Color("#0a1024"), UI.METAL, 0, 0)
 	rs.border_width_left = 2
 	rs.set_content_margin_all(10)
 	rp.add_theme_stylebox_override("panel", rs)
@@ -356,202 +357,7 @@ func _card() -> void:
 	var u: Dictionary = engine.units[sel]
 	var mine: bool = u["side"] in viewer()
 	var hidden: bool = not u["rev"] and not mine
-	var pc := PanelContainer.new()
-	pc.add_theme_stylebox_override("panel", UI.paper_style())
-	card_box.add_child(pc)
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 4)
-	pc.add_child(vb)
-	var hh := HBoxContainer.new()
-	hh.add_theme_constant_override("separation", 10)
-	vb.add_child(hh)
-	hh.add_child(UI.icon_rect(UI.counter_tex(u["side"], u["kind"], u["cls"], u["label"], hidden), Vector2(64, 64)))
-	var tv := VBoxContainer.new()
-	tv.add_theme_constant_override("separation", 0)
-	hh.add_child(tv)
-	var nm := "Pedina coperta" if hidden else engine.uname(u)
-	tv.add_child(UI.label(nm.to_upper(), 22, UI.INK, UI.font_bold))
-	tv.add_child(UI.label("%s · %s" % [D.SIDE_NAMES[u["side"]], engine.sc["sides"][u["side"]]], 17, UI.SIDE_D[u["side"]], UI.font_semi))
-	var where := ""
-	if u["st"] == "on":
-		where = "Esagono %s · direzione ore %s · velocità %d" % [engine.hcode(u["hex"]), D.DIR_NAMES[u["dir"]], u["v"]]
-	else:
-		where = {"prep": "Pronto sopra la nave", "dock": "Nell'hangar", "dead": "Distrutto", "jumped": "Saltato nell'iperspazio",
-			"landed": "Atterrato", "orbit": "In orbita (fuori gioco)", "off": "Uscito dalla mappa", "spent": "Senza energia"}.get(u["st"], u["st"])
-	vb.add_child(UI.label(where, 17, UI.INK, UI.font_semi))
-	if hidden:
-		vb.add_child(UI.wrap(UI.label("Non ancora individuata: si scopre entro 3 esagoni da una vostra astronave all'inizio della vostra fase di comando, o con la ricerca attiva.", 16, Color("#444"), UI.font_body), PANEL_W - 60))
-		return
-	match u["kind"]:
-		"ship":
-			_card_ship(vb, u, mine)
-		"bc":
-			_card_bc(vb, u, mine)
-		"mis":
-			var mt: String = u["cls"]
-			var t := "%s · civiltà %d" % [D.MNAME_FULL[mt], u["civ"]]
-			if mt != "ug":
-				t += " · variazione ±%d · manovra %d · energia %d" % [engine.vr(u), engine.mr(u), u["eu"]]
-			else:
-				t += " · accelera di 1 a ogni vostra fase di comando"
-			vb.add_child(UI.wrap(UI.label(t, 17, UI.INK, UI.font_body), PANEL_W - 60))
-			if mt == "g":
-				var host: Dictionary = engine.units.get(u.get("host", ""), {})
-				if not host.is_empty():
-					vb.add_child(UI.label("Guidato da %s (comando di battaglia «Guida»)" % engine.uname(host), 16, Color("#444"), UI.font_body))
-			if mt == "m" and u.get("mims_used", false):
-				vb.add_child(UI.label("Ha già lanciato i suoi 4 missili.", 16, Color("#444"), UI.font_body))
-
-
-func _stat_row(vb: VBoxContainer, items: Array) -> void:
-	var g := GridContainer.new()
-	g.columns = 4
-	g.add_theme_constant_override("h_separation", 14)
-	g.add_theme_constant_override("v_separation", 0)
-	for it in items:
-		g.add_child(UI.label(it[0], 15, Color("#555"), UI.font_body))
-		g.add_child(UI.label(str(it[1]), 17, UI.INK, UI.font_bold))
-	vb.add_child(g)
-
-
-func _box(st: int, armor := -1) -> Control:
-	var p := PanelContainer.new()
-	var sb := UI.panel_style(Color.WHITE if st < 3 else Color("#f3c4bb"), UI.INK, 2, 0)
-	sb.set_content_margin_all(0)
-	p.add_theme_stylebox_override("panel", sb)
-	p.custom_minimum_size = Vector2(30, 28)
-	var l := UI.label(["", "V", "D", "X"][st], 20, UI.RED if st == 3 else UI.INK, UI.font_bold)
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	p.add_child(l)
-	return p
-
-
-func _comp_row(vb: VBoxContainer, name: String, armor: int, st: int, extra := "", pod := "") -> void:
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 8)
-	h.add_child(_box(st))
-	if pod != "":
-		# miniatura del modulo: un clic la ingrandisce
-		var tb := TextureButton.new()
-		tb.texture_normal = UI.tex(D.pod_img(pod))
-		tb.ignore_texture_size = true
-		tb.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_COVERED
-		tb.custom_minimum_size = Vector2(78, 32)
-		tb.tooltip_text = "%s — tocca per ingrandire" % D.PODS[pod]["name"]
-		if st == 3:
-			tb.modulate = Color(0.55, 0.4, 0.38)
-		elif st == 2:
-			tb.modulate = Color(0.9, 0.75, 0.7)
-		var key := pod
-		tb.pressed.connect(func(): _pod_zoom(vb, h, key))
-		h.add_child(tb)
-	var l := UI.label(name, 17, UI.INK if st < 3 else Color("#8a4a3a"), UI.font_semi)
-	l.custom_minimum_size.x = 180 if pod == "" else 150
-	l.clip_text = true
-	h.add_child(l)
-	h.add_child(UI.label("cor. %d" % armor, 15, Color("#666"), UI.font_body))
-	if extra != "":
-		var e := UI.label(extra, 15, Color("#1d4f7a"), UI.font_semi)
-		e.clip_text = true
-		e.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		h.add_child(e)
-	vb.add_child(h)
-
-
-var _zoom_node: Control
-var _zoom_key := ""
-
-## immagine grande del modulo sotto la sua riga (un secondo clic la chiude)
-func _pod_zoom(vb: VBoxContainer, row: Control, key: String) -> void:
-	var same := _zoom_key == key and is_instance_valid(_zoom_node)
-	if is_instance_valid(_zoom_node):
-		_zoom_node.queue_free()
-	_zoom_key = ""
-	if same:
-		return
-	_zoom_key = key
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 2)
-	var img := UI.icon_rect(UI.tex(D.pod_img(key)), Vector2(PANEL_W - 60, (PANEL_W - 60) * 0.39))
-	box.add_child(img)
-	box.add_child(UI.wrap(UI.label(D.PODS[key]["name"].to_upper() + " — " + D.POD_TEXT.get(key, ""), 15, Color("#333"), UI.font_body), PANEL_W - 60))
-	vb.add_child(box)
-	vb.move_child(box, row.get_index() + 1)
-	_zoom_node = box
-
-
-func _card_ship(vb: VBoxContainer, u: Dictionary, mine: bool) -> void:
-	var sd: Dictionary = engine.sdef(u)
-	var ff := "nessuno"
-	if int(sd["ff"]) > 0:
-		ff = "classe %d%s" % [sd["ff"], " ATTIVO" if u.get("ffon", false) else ""]
-	_stat_row(vb, [["Variazione vel.", "±%d" % sd["vr"]], ["Manovra", "%d" % engine.mr(u)],
-		["Burster", "classe %d" % sd["burst"]], ["Corazza", "classe %d" % sd["armor"]],
-		["Campo di forza", ff], ["Civiltà", sd["civ"]], ["Puntamento", "%d" % sd["tp"]], ["Aerodinamica", "sì" if sd["stream"] else "no"]])
-	if mine or ended or replaying:
-		var e := engine.energy(u)
-		var bl := e / engine.burn(u)
-		var row := HBoxContainer.new()
-		row.add_child(UI.label("Energia: %d blocchi (%d unità, blocco = %d)" % [bl, e, engine.burn(u)], 17, UI.INK, UI.font_bold))
-		vb.add_child(row)
-		var bar := ProgressBar.new()
-		bar.max_value = maxi(1, int(u["cap"]))
-		bar.value = e
-		bar.show_percentage = false
-		bar.custom_minimum_size = Vector2(PANEL_W - 60, 10)
-		var bg := StyleBoxFlat.new()
-		bg.bg_color = Color("#cfc6ad")
-		var fg := StyleBoxFlat.new()
-		fg.bg_color = UI.HEX
-		bar.add_theme_stylebox_override("background", bg)
-		bar.add_theme_stylebox_override("fill", fg)
-		vb.add_child(bar)
-		vb.add_child(UI.label("Comandi di battaglia per fase: %d" % engine.bc_count(u), 16, Color("#444"), UI.font_body))
-	if int(u.get("jump", 0)) > 0:
-		vb.add_child(UI.label("SALTO %s" % ("PREPARATO" if int(u["jump"]) == 1 else "IN CORSO"), 18, UI.RED, UI.font_bold))
-	vb.add_child(UI.heading("Compartimenti", 18, UI.INK))
-	_comp_row(vb, "Ponte", sd["armor"], engine.part_state(u, "bridge"))
-	_comp_row(vb, "Motore", sd["armor"], engine.part_state(u, "engine"))
-	if int(sd["ff"]) > 0:
-		_comp_row(vb, "Campo di forza", sd["armor"], engine.part_state(u, "ff"))
-	for i in u["pods"].size():
-		var p: Dictionary = u["pods"][i]
-		var pd: Dictionary = D.PODS[p["t"]]
-		var extra := ""
-		if pd["lp"] and (mine or ended or replaying):
-			var bits := []
-			for mt in D.MTYPES:
-				var n := int(p["ms"].get(mt, 0))
-				if n > 0:
-					bits.append("%s %d%s" % [{"ug": "NG", "g": "G", "i": "I", "m": "M"}[mt], n, "*" if mt in pd["prep"] else ""])
-			extra = " ".join(bits)
-		if p["t"] == "bcpod" and p["bc"] != "":
-			var b: Dictionary = engine.units[p["bc"]]
-			extra = "%s: %s" % [b["label"], {"dock": "a bordo", "prep": "pronto", "on": "in volo", "dead": "perso"}.get(b["st"], b["st"])]
-		if p["t"] == "tractor":
-			extra = "civiltà %d" % p["civ"]
-		_comp_row(vb, "%d. %s" % [i + 1, pd["name"]], p["armor"], engine.pod_state(u, i), extra, p["t"])
-	var prep := engine.prepared_of(u)
-	if not prep.is_empty() and (mine or ended):
-		var names := []
-		for m in prep:
-			names.append("%s (mod. %d)" % [D.MNAME[m["cls"]], int(m["pod"]) + 1])
-		vb.add_child(UI.wrap(UI.label("Pronti al lancio: " + ", ".join(names), 16, UI.INK, UI.font_semi), PANEL_W - 60))
-	elif not prep.is_empty():
-		vb.add_child(UI.label("Pedine coperte sopra la nave: %d" % prep.size(), 16, UI.INK, UI.font_semi))
-	vb.add_child(UI.label("* = da preparare con un comando di battaglia", 14, Color("#666"), UI.font_body))
-
-
-func _card_bc(vb: VBoxContainer, u: Dictionary, mine: bool) -> void:
-	var sd: Dictionary = engine.sdef(u)
-	_stat_row(vb, [["Variazione vel.", "±%d" % sd["vr"]], ["Manovra", "%d" % engine.mr(u)],
-		["Burster", "classe %d" % sd["burst"]], ["Corazza", "classe %d" % sd["armor"]], ["Puntamento", "%d" % sd["tp"]], ["Energia", "%d / 15" % u["eu"]]])
-	_comp_row(vb, "Ponte", sd["armor"], engine.part_state(u, "bridge"))
-	_comp_row(vb, "Motore", sd["armor"], engine.part_state(u, "engine"))
-	var host: Dictionary = engine.units.get(u.get("host", ""), {})
-	if not host.is_empty():
-		vb.add_child(UI.label("Nave madre: %s" % engine.uname(host), 16, Color("#444"), UI.font_body))
+	card_box.add_child(ShipCard.build(engine, u, hidden, mine or ended or replaying, PANEL_W - 36))
 
 
 func _legend() -> void:
@@ -1627,14 +1433,19 @@ func _end_panel(res: Dictionary) -> void:
 
 func start_replay() -> void:
 	replaying = true
-	rp_starts = Timeline.starts(engine.history)
+	rp_track = ReplayTrack.new()
+	rp_track.build(engine.history, engine.reg)
+	rp_starts = [0.0, rp_track.total]
 	rp_time = 0.0
+	_set_state(rp_track.state_at(0.0))
+	board2d.fit(true)
+	board3d.fit(true)
 	rp_play = true
 	sel = ""
 	_card()
 	_clear_box()
 	act_box.add_child(UI.title("Replay", 34))
-	_txt("La partita intera, dal primo movimento all'ultima esplosione, senza interruzioni. Si può fermare, accelerare e spostare con il cursore; la mappa resta girevole (2D o 3D). Tutte le pedine sono scoperte.", UI.MUTED, 17)
+	_txt("La partita intera come un film continuo: in ogni turno tutte le unità dei due lati si muovono insieme, ciascuna alla sua velocità, mentre laser, particelle e missili partono in tempo reale dalle navi in movimento. Si può fermare, accelerare e spostare con il cursore; la mappa resta girevole (2D o 3D). Tutte le pedine sono scoperte.", UI.MUTED, 17)
 	_btn("Esci dal replay", func(): stop_replay())
 	if is_instance_valid(replay_bar):
 		replay_bar.queue_free()
@@ -1694,21 +1505,16 @@ func stop_replay() -> void:
 
 
 func _replay_step(dt: float) -> void:
-	if rp_starts.is_empty() or engine.history.is_empty():
+	if rp_track == null:
 		return
-	var total: float = rp_starts[-1]
+	var total: float = rp_track.total
 	if rp_play and not _rp_drag:
 		rp_time = minf(total, rp_time + dt * rp_speed)
 		if rp_time >= total:
 			rp_play = false
 			if is_instance_valid(rp_btn):
 				rp_btn.text = "Avvia"
-	# segmento corrente
-	var i := rp_starts.bsearch(rp_time, true) - 1
-	i = clampi(i, 0, engine.history.size() - 1)
-	var dur := Timeline.duration(engine.history[i])
-	var t := (rp_time - float(rp_starts[i])) / dur
-	var st := Timeline.state_at(engine.history, i, t, engine.reg)
+	var st := rp_track.state_at(rp_time)
 	var b = board3d if view3d else board2d
 	b.viewer = [0, 1]
 	b.ov = {}
@@ -1716,9 +1522,7 @@ func _replay_step(dt: float) -> void:
 	if is_instance_valid(rp_slider) and not _rp_drag:
 		rp_slider.set_value_no_signal(rp_time)
 	if is_instance_valid(rp_lbl):
-		var seg: Dictionary = engine.history[i]
-		var ph: String = {"move": "movimento", "cmd": "comando", "fire": "fuoco", "setup": "schieramento", "over": "fine"}.get(str(seg.get("ph", "")), "")
-		rp_lbl.text = "Turno %d · %s %d" % [maxi(1, int(seg.get("turn", 1))), ph, int(seg.get("side", 0)) + 1]
+		rp_lbl.text = rp_track.label_at(rp_time)
 
 
 # ================================================================ varie

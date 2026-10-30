@@ -129,6 +129,7 @@ func _deploy(e: DVEngine, s: int, req: Dictionary) -> Dictionary:
 # ================================================================ comandi
 
 func _commands(e: DVEngine, s: int) -> Dictionary:
+	_rc = {}
 	var m := {}
 	var b := []
 	var enemies := e.live_units(1 - s)
@@ -276,15 +277,15 @@ func _score_state(e: DVEngine, u: Dictionary, g: Dictionary, a: int, t: int, w, 
 	var careful: bool = g.get("careful", false)
 	for t2 in enemies:
 		if t2["kind"] == "mis":
-			# minaccia dei missili nemici nel loro prossimo movimento
-			var mp := _missile_reach(e, t2)
-			var dmin := 99
-			for h in mp:
-				dmin = mini(dmin, Hex.dist(h, endh))
-			if dmin <= 0:
-				score -= 25.0
-			elif dmin <= _maneuver_slack(e, t2):
-				score -= 12.0 / dmin
+			# minaccia esatta: il missile nemico, nel suo prossimo movimento (dopo il nostro), può
+			# raggiungere con qualche manovra l'esagono dove ci fermeremo?
+			if endh in _mis_reach(e, t2):
+				var mm: Dictionary = t2.duplicate()
+				var rv: int = e.rel_vel(mm, fu)[0]
+				var ch: int = D.INTERCEPT[clampi(int(t2["civ"]), 6, 8)][D.icol(rv)]
+				var pr := minf(1.0, ch / 10.0)
+				var ffk := 0.25 if (u["kind"] == "ship" and e.ff_class(u) > 0) else 1.0
+				score -= 70.0 * pr * ffk
 			continue
 		if not t2.get("alerted", true):
 			continue
@@ -299,6 +300,8 @@ func _score_state(e: DVEngine, u: Dictionary, g: Dictionary, a: int, t: int, w, 
 					break
 			if Hex.dist(endh, t2["hex"]) <= 2:
 				score -= 6.0
+			if careful and Hex.dist(endh, _pred(t2)) <= int(t2["v"]) + 5:
+				score -= 25.0
 		var inc := _exp_fire(e, t2, su)
 		score -= inc * (8.0 if careful else 4.0)
 		var out := _exp_fire(e, fu, t2)
@@ -311,7 +314,7 @@ func _score_state(e: DVEngine, u: Dictionary, g: Dictionary, a: int, t: int, w, 
 				if t2["kind"] != "mis" and t2.get("alerted", true):
 					dmin = mini(dmin, Hex.dist(endh, _pred(t2)))
 			if dmin < 999:
-				var want := 6 if g.get("careful", false) else 2
+				var want := 9 if g.get("careful", false) else 2
 				score -= absf(dmin - want) * 0.6
 				# non perdere il contatto (nello scenario 2 a 25 esagoni è pareggio)
 				score -= maxf(0.0, dmin - 9) * 2.0
@@ -363,17 +366,46 @@ func _pred(u: Dictionary) -> Vector2i:
 	return u["hex"] if p[0].is_empty() else p[0][-1]
 
 
-func _missile_reach(e: DVEngine, m: Dictionary) -> Array:
-	var v: int = m["v"]
-	if m["cls"] == "ug":
-		v += 1
-	return Hex.path(m["hex"], m["dir"], m["zig"], v)[0]
+## esagoni che un missile può attraversare nel suo prossimo movimento, contando le manovre possibili
+## (i non guidati accelerano di 1 e vanno dritti)
+var _rc := {}
+
+func _mis_reach(e: DVEngine, m: Dictionary) -> Dictionary:
+	var key := "%s|%s|%d|%d|%d" % [m["id"], m["hex"], m["dir"], m["v"], m.get("eu", 0)]
+	if _rc.has(key):
+		return _rc[key]
+	_rc[key] = _mis_reach0(e, m)
+	return _rc[key]
 
 
-func _maneuver_slack(e: DVEngine, m: Dictionary) -> int:
-	if m["cls"] == "ug" or int(m.get("eu", 0)) <= 0:
-		return 0
-	return clampi(e.mr(m) - int(m["v"]), 0, 3)
+func _mis_reach0(e: DVEngine, m: Dictionary) -> Dictionary:
+	return _reach_from(e, m["cls"], int(m.get("civ", 7)), m["hex"], int(m["dir"]), int(m["zig"]), int(m["v"]), int(m.get("eu", 0)))
+
+
+func _reach_from(e: DVEngine, mt: String, civ: int, h: Vector2i, d: int, z: int, v: int, eu: int) -> Dictionary:
+	var out := {}
+	if mt == "ug":
+		for x in Hex.path(h, d, z, mini(9, v + 1))[0]:
+			out[x] = true
+		return out
+	var row: Array = D.MISSILES[mt][clampi(civ, 6, 8)]
+	var vrm: int = row[0]
+	var mrm: int = row[1]
+	var n := mrm - v
+	var single := false
+	if v >= mrm:
+		n = 1
+		single = true
+	n = mini(n, eu)
+	for a in range(-vrm, vrm + 1):
+		for t in range(-3, 4):
+			if absi(a) + absi(t) > n or (single and t != 0):
+				continue
+			var nv := clampi(v + a, 0, 9)
+			var zz := z if t == 0 else 0
+			for x in Hex.path(h, d + t, zz, nv)[0]:
+				out[x] = true
+	return out
 
 
 ## colpi attesi (somma delle probabilità) che a può mettere a segno su b
@@ -605,28 +637,40 @@ func _missile_score(e: DVEngine, u: Dictionary, a: int, t: int, enemies: Array) 
 	su["zig"] = st[3]
 	var p := Hex.path(st[0], st[1], st[3], st[2])
 	var hs: Array = p[0]
-	var score := 0.0
+	var endh: Vector2i = u["hex"] if hs.is_empty() else hs[-1]
+	var score := -20.0
 	var side: int = u["side"]
+	var civ := clampi(int(u["civ"]), 6, 8)
 	for t2 in enemies:
 		if t2["kind"] == "mis" or not t2.get("alerted", true):
 			continue
 		if e.scn == 3 and side == 1 and t2["cls"] == "Mu":
 			continue     # i pirati non vogliono distruggere la preda
 		var w := tweight(e, side, t2)
+		var ff := 0.45 if (t2["kind"] == "ship" and e.ff_class(t2) > 0) else 1.0
+		# 1) nel nostro movimento il nemico sta fermo: lo attraversiamo?
 		if t2["hex"] in hs:
 			var rv: int = e.rel_vel(su, t2)[0]
-			var ch: int = D.INTERCEPT[clampi(int(u["civ"]), 6, 8)][D.icol(rv)]
-			var pr := minf(1.0, ch / 10.0)
-			if t2["kind"] == "ship" and e.ff_class(t2) > 0:
-				pr *= 0.5
-			score = maxf(score, 100.0 * pr * w)
+			var pr := minf(1.0, D.INTERCEPT[civ][D.icol(rv)] / 10.0)
+			score = maxf(score, 100.0 * pr * w * ff)
+			continue
+		# 2) il nemico, muovendosi dopo di noi, entra nel nostro esagono?
+		var tp: Array = Hex.path(t2["hex"], t2["dir"], t2["zig"], t2["v"])[0]
+		if endh in tp:
+			var mm: Dictionary = su.duplicate()
+			mm["hex"] = endh
+			var rv2: int = e.rel_vel(mm, t2)[0]
+			var pr2 := minf(1.0, D.INTERCEPT[civ][D.icol(rv2)] / 10.0)
+			score = maxf(score, 80.0 * pr2 * w * ff)
+			continue
+		# 3) dal punto d'arrivo, il turno dopo, si può raggiungere dove sarà il nemico?
+		var P: Vector2i = tp[-1] if not tp.is_empty() else t2["hex"]
+		var eu_left: int = int(u.get("eu", 0)) - absi(a) - absi(t)
+		var reach := _reach_from(e, u["cls"], civ, endh, st[1], p[1], st[2], maxi(0, eu_left))
+		if reach.has(P):
+			score = maxf(score, 45.0 * w * ff)
 		else:
-			var endh: Vector2i = u["hex"] if hs.is_empty() else hs[-1]
-			var tp := _pred(t2)
-			var d := Hex.dist(endh, tp)
-			if d == 0:
-				score = maxf(score, 40.0 * w)
-			score = maxf(score, (30.0 - d * 3.0) * w)
+			score = maxf(score, (25.0 - Hex.dist(endh, P) * 3.0) * w)
 	return score
 
 
@@ -696,44 +740,41 @@ func _hit_value(e: DVEngine, s: int, t: Dictionary) -> float:
 	return tweight(e, s, t)
 
 
+## lancio di un missile: si valuta con precisione, perché fino al movimento del missile il nemico
+## farà solo il suo prossimo movimento (dritto, con velocità e direzione che già conosciamo)
 func _best_launch(e: DVEngine, u: Dictionary, lo: Dictionary) -> Dictionary:
 	var mt: String = lo["mt"]
+	var civ: int = clampi(int(u["pods"][lo["pod"]]["civ"]), 6, 8)
+	var eu := 0
+	if mt != "ug":
+		eu = int(D.MISSILES[mt][civ][2])
 	var best := {}
 	var bv := 0.0
 	var enemies := e.valid_targets(u["side"])
 	for sp in e.launch_spots(u):
 		for d in sp[1]:
 			for v in e.launch_vels(u):
-				var m := {"hex": sp[0], "dir": d, "v": v, "zig": 0, "cls": mt, "kind": "mis"}
 				var val := 0.0
+				var reach := _reach_from(e, mt, civ, sp[0], d, 0, v, eu)
 				for t in enemies:
 					if t["kind"] == "mis":
 						continue
 					if e.scn == 3 and u["side"] == 1 and t["cls"] == "Mu":
 						continue
-					var tp := _pred(t)
-					var mv: int = v + (1 if mt == "ug" else 0)
-					var hs: Array = Hex.path(sp[0], d, 0, mv)[0]
 					var w := tweight(e, u["side"], t)
-					var reach := 0
-					if mt != "ug":
-						var civ: int = u["pods"][lo["pod"]]["civ"]
-						reach = clampi(int(D.MISSILES[mt][clampi(civ, 6, 8)][1]) - v, 1, 4)
-					if tp in hs or t["hex"] in hs:
-						val = maxf(val, 0.7 * w)
-					else:
-						var endh: Vector2i = hs[-1] if not hs.is_empty() else sp[0]
-						var dd := Hex.dist(endh, tp)
-						if mt == "ug":
-							if dd <= 1:
-								val = maxf(val, 0.25 * w)
-						else:
-							if dd <= reach + 2:
-								val = maxf(val, (0.55 - dd * 0.05) * w)
-							elif Hex.dist(sp[0], tp) <= 14:
-								val = maxf(val, 0.12 * w)
+					var ff := 0.45 if (t["kind"] == "ship" and e.ff_class(t) > 0) else 1.0
+					var tpath: Array = Hex.path(t["hex"], t["dir"], t["zig"], t["v"])[0]
+					var P: Vector2i = tpath[-1] if not tpath.is_empty() else t["hex"]
+					var mm := {"hex": sp[0], "dir": d, "v": v + (1 if mt == "ug" else 0), "zig": 0, "kind": "mis", "cls": mt}
+					var rv: int = e.rel_vel(mm, t)[0]
+					var pr := minf(1.0, D.INTERCEPT[civ][D.icol(rv)] / 10.0)
+					if sp[0] in tpath:
+						# il nemico passa sopra il missile appena lanciato
+						val = maxf(val, 0.95 * pr * w * ff)
+					elif reach.has(P):
+						val = maxf(val, (0.9 if mt == "ug" else 0.8) * pr * w * ff)
 				if mt == "m":
-					val *= 1.2
+					val *= 1.15
 				if val > bv:
 					bv = val
 					best = {"s": u["id"], "src": lo["pod"], "launch": mt, "hex": sp[0], "dir": d, "v": v}

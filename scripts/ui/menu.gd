@@ -18,6 +18,7 @@ var sc_box: VBoxContainer
 var sc_text: RichTextLabel
 var seat_rows: Array = []
 var sc_btns: Array = []
+var sc_ships: HBoxContainer
 
 
 func _ready() -> void:
@@ -39,7 +40,7 @@ func _ready() -> void:
 
 	# a sinistra: la scatola
 	var frame := PanelContainer.new()
-	var fs := UI.panel_style(Color.BLACK, UI.HEX, 3, 2)
+	var fs := UI.panel_style(Color.BLACK, UI.METAL, 3, 4)
 	fs.set_content_margin_all(4)
 	fs.shadow_color = Color(0, 0, 0, 0.7)
 	fs.shadow_size = 18
@@ -59,7 +60,7 @@ func _ready() -> void:
 
 	# a destra: scenario e giocatori
 	var col := VBoxContainer.new()
-	col.position = Vector2(700, 50)
+	col.position = Vector2(700, 30)
 	col.custom_minimum_size = Vector2(1160, 0)
 	col.add_theme_constant_override("separation", 12)
 	page.add_child(col)
@@ -67,9 +68,15 @@ func _ready() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	col.add_child(row)
+	var stars := ["Piccolo", "Sword", "Iota", "Mu", "Spear"]
 	for i in D.SCENARIOS.size():
 		var sc: Dictionary = D.SCENARIOS[i]
-		var b := UI.button("%d · %s" % [i + 1, sc["name"]], 222, 56, 19)
+		var b := UI.button("%d · %s" % [i + 1, sc["name"]], 222, 118, 19)
+		b.icon = UI.tex("res://assets/ships_alt/%s.webp" % stars[i])
+		b.expand_icon = true
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		b.clip_text = true
 		var k := i
 		b.pressed.connect(func():
 			scenario = k
@@ -78,14 +85,20 @@ func _ready() -> void:
 		sc_btns.append(b)
 	var sp := PanelContainer.new()
 	sp.add_theme_stylebox_override("panel", UI.dark_style(6, 0.9))
-	sp.custom_minimum_size = Vector2(1160, 300)
+	sp.custom_minimum_size = Vector2(1160, 0)
 	col.add_child(sp)
+	var spv := VBoxContainer.new()
+	spv.add_theme_constant_override("separation", 10)
+	sp.add_child(spv)
 	sc_text = RichTextLabel.new()
 	sc_text.bbcode_enabled = true
 	sc_text.fit_content = true
 	sc_text.add_theme_font_size_override("normal_font_size", 20)
 	sc_text.add_theme_font_size_override("bold_font_size", 21)
-	sp.add_child(sc_text)
+	spv.add_child(sc_text)
+	sc_ships = HBoxContainer.new()
+	sc_ships.add_theme_constant_override("separation", 8)
+	spv.add_child(sc_ships)
 	col.add_child(UI.heading("Comandanti", 26, UI.YELLOW))
 	for s in 2:
 		var r := HBoxContainer.new()
@@ -147,14 +160,39 @@ func _refresh() -> void:
 			b.remove_theme_font_override("font")
 	var sc: Dictionary = D.SCENARIOS[scenario]
 	var t := "[font_size=30][color=#f4e46a]%s[/color][/font_size]   [color=#9b9384](%s)[/color]\n" % [sc["name"], sc["orig"]]
-	t += sc["text"] + "\n\n"
-	for s in 2:
-		var parts := []
-		for f in sc["forces"][s]:
-			parts.append("%s %s" % [D.SHIPS[f["cls"]]["name"], f["id"]])
-		t += "[color=%s][b]%s — %s:[/b][/color] %s\n" % [UI.SIDE[s].to_html(false), D.SIDE_NAMES[s], sc["sides"][s], ", ".join(parts)]
-	t += "\n[color=#8fd3f4][b]Vittoria:[/b] %s[/color]" % sc["win"]
+	t += sc["text"] + "\n"
+	t += "[color=%s][b]%s[/b][/color]  contro  [color=%s][b]%s[/b][/color]\n" % [UI.SIDE[0].to_html(false), sc["sides"][0], UI.SIDE[1].to_html(false), sc["sides"][1]]
+	t += "[color=#8fd3f4][b]Vittoria:[/b] %s[/color]" % sc["win"]
 	sc_text.text = t
+	# le navi dello scenario con le loro illustrazioni
+	for c in sc_ships.get_children():
+		c.queue_free()
+	var n := 0
+	for side in 2:
+		for f in sc["forces"][side]:
+			n += 1
+	var tw := minf(220.0, (1130.0 - 8 * (n - 1)) / n)
+	for side in 2:
+		for f in sc["forces"][side]:
+			var pc := PanelContainer.new()
+			var ps := UI.panel_style(UI.NAVY, UI.SIDE[side], 2, 4)
+			ps.set_content_margin_all(3)
+			pc.add_theme_stylebox_override("panel", ps)
+			var v := VBoxContainer.new()
+			v.add_theme_constant_override("separation", 0)
+			pc.add_child(v)
+			var img := TextureRect.new()
+			img.texture = UI.tex("res://assets/ships_alt/%s.webp" % f["cls"])
+			img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+			img.custom_minimum_size = Vector2(tw - 6, (tw - 6) * 0.36)
+			img.clip_contents = true
+			v.add_child(img)
+			var l := UI.label("%s %s" % [D.SHIPS[f["cls"]]["name"], f["id"]], 16, UI.SIDE[side], UI.font_bold)
+			l.clip_text = true
+			l.custom_minimum_size.x = tw - 8
+			v.add_child(l)
+			sc_ships.add_child(pc)
 	for s in 2:
 		var r: HBoxContainer = seat_rows[s]
 		for c in r.get_children():

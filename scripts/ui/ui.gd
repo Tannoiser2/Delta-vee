@@ -8,9 +8,14 @@ extends RefCounted
 
 const D = preload("res://scripts/data/dv_data.gd")
 
-const SPACE := Color("#08080b")
-const SPACE_L := Color("#15141b")
-const PANEL := Color("#121118")
+const SPACE := Color("#05081a")
+const SPACE_L := Color("#101a36")
+const PANEL := Color("#0c1328")
+## metallo delle cornici, come i riquadri delle illustrazioni
+const METAL := Color("#aab3c5")
+const METAL_D := Color("#4b5570")
+const NAVY := Color("#15203d")
+const STRIPE := Color("#d0302a")
 const HEX := Color("#e2541b")
 const HEX_D := Color("#7a2c0e")
 const ORANGE := Color("#f26a21")
@@ -85,7 +90,7 @@ static func counter_tex(side: int, kind: String, cls: String, label: String, bac
 	return tex("res://assets/counters/%s%s.png" % [name, "_b" if back else ""])
 
 
-static func panel_style(bg: Color, border: Color = HEX_D, bw := 2, radius := 6) -> StyleBoxFlat:
+static func panel_style(bg: Color, border: Color = METAL_D, bw := 2, radius := 6) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg
 	sb.border_color = border
@@ -96,7 +101,7 @@ static func panel_style(bg: Color, border: Color = HEX_D, bw := 2, radius := 6) 
 
 
 static func dark_style(radius := 8, alpha := 0.94) -> StyleBoxFlat:
-	var sb := panel_style(Color(PANEL, alpha), HEX, 2, radius)
+	var sb := panel_style(Color(PANEL, alpha), METAL, 2, radius)
 	sb.shadow_color = Color(0, 0, 0, 0.6)
 	sb.shadow_size = 10
 	return sb
@@ -120,19 +125,26 @@ static func label(text: String, size := 20, col := TEXT, font: Font = null) -> L
 	return l
 
 
-## titolo come il logo della scatola: giallo, tondo, con ombra arancione
+## titolo come il logo delle illustrazioni: giallo, tondo, con contorno scuro e ombra
 static func title(text: String, size := 48, col := YELLOW) -> Label:
 	init_fonts()
 	var l := label(text, size, col, font_title)
-	l.add_theme_color_override("font_shadow_color", Color(HEX, 0.85))
-	l.add_theme_constant_override("shadow_offset_x", maxi(2, size / 18))
-	l.add_theme_constant_override("shadow_offset_y", maxi(2, size / 18))
+	l.add_theme_color_override("font_outline_color", Color("#1a1206"))
+	l.add_theme_constant_override("outline_size", maxi(3, size / 12))
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.7))
+	l.add_theme_constant_override("shadow_offset_x", maxi(2, size / 16))
+	l.add_theme_constant_override("shadow_offset_y", maxi(2, size / 16))
+	l.add_theme_constant_override("shadow_outline_size", maxi(3, size / 12))
 	return l
 
 
-static func heading(text: String, size := 24, col := YELLOW) -> Label:
+static func heading(text: String, size := 24, col := Color.WHITE) -> Label:
 	init_fonts()
-	return label(text.to_upper(), size, col, font_bold)
+	var l := label(text.to_upper(), size, col, font_bold)
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	l.add_theme_constant_override("shadow_offset_x", 2)
+	l.add_theme_constant_override("shadow_offset_y", 2)
+	return l
 
 
 static func mono(text: String, size := 18, col := CYAN) -> Label:
@@ -165,14 +177,15 @@ static func button(text: String, w := 200.0, h := 46.0, size := 20) -> Button:
 	return b
 
 
+## pulsante principale: il rosso delle strisce degli scafi, cornice chiara
 static func primary(b: Button) -> Button:
 	init_fonts()
-	b.add_theme_stylebox_override("normal", _btn(HEX, YELLOW))
-	b.add_theme_stylebox_override("hover", _btn(ORANGE_L, YELLOW_L))
+	b.add_theme_stylebox_override("normal", _btn(STRIPE, Color("#ffd0c8")))
+	b.add_theme_stylebox_override("hover", _btn(Color("#e8463a"), Color.WHITE))
 	b.add_theme_stylebox_override("pressed", _btn(YELLOW, INK))
-	b.add_theme_stylebox_override("disabled", _btn(Color("#4a3a32"), Color("#2a221e")))
-	b.add_theme_color_override("font_color", INK)
-	b.add_theme_color_override("font_hover_color", INK)
+	b.add_theme_stylebox_override("disabled", _btn(Color("#3a2a32"), Color("#2a221e")))
+	b.add_theme_color_override("font_color", Color.WHITE)
+	b.add_theme_color_override("font_hover_color", Color.WHITE)
 	b.add_theme_color_override("font_pressed_color", INK)
 	b.add_theme_font_override("font", font_bold)
 	return b
@@ -183,7 +196,11 @@ static func _btn(bg: Color, border: Color) -> StyleBoxFlat:
 	sb.bg_color = bg
 	sb.border_color = border
 	sb.set_border_width_all(2)
+	sb.border_width_bottom = 3
 	sb.set_corner_radius_all(4)
+	sb.shadow_color = Color(0, 0, 0, 0.45)
+	sb.shadow_size = 3
+	sb.shadow_offset = Vector2(0, 2)
 	sb.content_margin_left = 12
 	sb.content_margin_right = 12
 	sb.content_margin_top = 3
@@ -196,16 +213,16 @@ static func make_theme() -> Theme:
 	var th := Theme.new()
 	th.default_font = font_semi
 	th.default_font_size = 20
-	var sb := _btn(Color("#1d1a20"), HEX_D)
+	var sb := _btn(NAVY, METAL_D)
 	th.set_stylebox("normal", "Button", sb)
-	th.set_stylebox("hover", "Button", _btn(Color("#2c2228"), HEX))
-	th.set_stylebox("pressed", "Button", _btn(HEX, YELLOW))
-	th.set_stylebox("disabled", "Button", _btn(Color("#141216"), Color("#2a2420")))
+	th.set_stylebox("hover", "Button", _btn(Color("#22305a"), METAL))
+	th.set_stylebox("pressed", "Button", _btn(STRIPE, Color("#ffd0c8")))
+	th.set_stylebox("disabled", "Button", _btn(Color("#0b1020"), Color("#1d2438")))
 	th.set_stylebox("focus", "Button", StyleBoxEmpty.new())
 	th.set_color("font_color", "Button", TEXT)
 	th.set_color("font_hover_color", "Button", YELLOW_L)
-	th.set_color("font_pressed_color", "Button", INK)
-	th.set_color("font_disabled_color", "Button", Color("#5b544a"))
+	th.set_color("font_pressed_color", "Button", Color.WHITE)
+	th.set_color("font_disabled_color", "Button", Color("#4d566e"))
 	th.set_font("font", "Button", font_semi)
 	th.set_font_size("font_size", "Button", 20)
 	th.set_color("font_color", "Label", TEXT)
@@ -234,7 +251,7 @@ static func make_theme() -> Theme:
 	tp.set_content_margin_all(8)
 	th.set_stylebox("panel", "TooltipPanel", tp)
 	var sc := StyleBoxFlat.new()
-	sc.bg_color = Color(HEX, 0.9)
+	sc.bg_color = Color(METAL, 0.8)
 	sc.set_corner_radius_all(3)
 	for k in ["grabber", "grabber_highlight", "grabber_pressed"]:
 		th.set_stylebox(k, "VScrollBar", sc)
@@ -243,13 +260,13 @@ static func make_theme() -> Theme:
 	sct.bg_color = Color(1, 1, 1, 0.06)
 	th.set_stylebox("scroll", "VScrollBar", sct)
 	var sl := StyleBoxFlat.new()
-	sl.bg_color = Color(HEX_D, 0.8)
+	sl.bg_color = Color(METAL_D, 0.8)
 	sl.content_margin_top = 4
 	sl.content_margin_bottom = 4
 	th.set_stylebox("slider", "HSlider", sl)
 	th.set_stylebox("normal", "OptionButton", sb)
-	th.set_stylebox("hover", "OptionButton", _btn(Color("#2c2228"), HEX))
-	th.set_stylebox("pressed", "OptionButton", _btn(HEX, YELLOW))
+	th.set_stylebox("hover", "OptionButton", _btn(Color("#22305a"), METAL))
+	th.set_stylebox("pressed", "OptionButton", _btn(STRIPE, Color("#ffd0c8")))
 	th.set_stylebox("focus", "OptionButton", StyleBoxEmpty.new())
 	th.set_font("font", "OptionButton", font_semi)
 	th.set_font_size("font_size", "OptionButton", 19)
@@ -266,9 +283,11 @@ static func make_theme() -> Theme:
 	return th
 
 
-## Sfondo: lo spazio nero con le stelle e una tenue griglia esagonale arancione (disegnato, nessuna immagine).
+## Sfondo come le illustrazioni: spazio blu notte con nebulose viola e rosa, stelle, il bordo di un
+## pianeta in basso e una tenue griglia esagonale arancione (tutto disegnato, nessuna immagine).
 class Starfield extends Control:
 	var stars := []
+	var blobs := []
 	var grid := true
 
 	func _ready() -> void:
@@ -276,12 +295,33 @@ class Starfield extends Control:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		var r := RandomNumberGenerator.new()
 		r.seed = 1981
-		for i in 320:
+		for i in 420:
 			stars.append([Vector2(r.randf(), r.randf()), r.randf_range(0.5, 2.0), r.randf_range(0.25, 1.0)])
+		for i in 26:
+			var c := Color("#5b2d8c") if i % 3 == 0 else (Color("#b03a78") if i % 3 == 1 else Color("#2a4fa8"))
+			blobs.append([Vector2(r.randf_range(0.45, 1.0), r.randf_range(0.0, 0.7)), r.randf_range(0.08, 0.26), c])
 		resized.connect(queue_redraw)
 
 	func _draw() -> void:
-		draw_rect(Rect2(Vector2.ZERO, size), UI.SPACE)
+		# fondo a fasce dal blu notte al blu più chiaro
+		var bands := 24
+		for i in bands:
+			var f := float(i) / bands
+			var col := Color("#04061a").lerp(Color("#0d1c46"), f * 0.9)
+			draw_rect(Rect2(0, size.y * f, size.x, size.y / bands + 1), col)
+		# nebulose
+		for b in blobs:
+			var c: Vector2 = b[0] * size
+			var rad: float = b[1] * size.length()
+			for k in 6:
+				draw_circle(c, rad * (1.0 - k * 0.14), Color(b[2], 0.025))
+		# il bordo di un pianeta, come in fondo alle illustrazioni
+		var pc := Vector2(size.x * 0.18, size.y * 2.15)
+		var pr := size.y * 1.32
+		draw_circle(pc, pr + 26, Color(0.35, 0.6, 1.0, 0.08))
+		draw_circle(pc, pr + 10, Color(0.4, 0.7, 1.0, 0.12))
+		draw_circle(pc, pr, Color("#0b1838"))
+		draw_arc(pc, pr, PI * 1.25, PI * 1.75, 128, Color(0.55, 0.8, 1.0, 0.55), 3.0)
 		if grid:
 			var s := 46.0
 			var cols := int(size.x / (s * 1.5)) + 2
@@ -291,7 +331,7 @@ class Starfield extends Control:
 					var c := Hex.center(Vector2i(q, rr), s)
 					var pts := Hex.corners(c, s)
 					pts.append(pts[0])
-					draw_polyline(pts, Color(UI.HEX, 0.07), 1.5)
+					draw_polyline(pts, Color(UI.HEX, 0.05), 1.5)
 		for st in stars:
 			var p: Vector2 = st[0] * size
-			draw_circle(p, st[1], Color(1, 1, 0.92, st[2] * 0.75))
+			draw_circle(p, st[1], Color(1, 1, 0.95, st[2] * 0.8))

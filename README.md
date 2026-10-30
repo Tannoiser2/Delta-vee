@@ -29,15 +29,24 @@ repository è pubblico).
   (punti vittoria e orbita attorno a Zaraznov).
 - **Due lati**, ognuno persona o IA (facile, normale, difficile); con due persone allo stesso schermo si gioca
   a turno. L'IA guarda un passo avanti con precisione e qualche turno più in là per gli obiettivi
-  dello scenario. **Suggerisci** propone gli ordini o il colpo dell'IA, che si possono modificare.
+  dello scenario. Lanci e manovre dei missili sono calcolati con esattezza (fino al loro movimento il
+  nemico fa solo il suo prossimo movimento, già noto); ogni nave evita gli esagoni che i missili nemici
+  possono raggiungere. **Suggerisci** propone gli ordini o il colpo dell'IA, che si possono modificare.
 - **Mappa 2D** come il tabellone (sigle degli esagoni, logo e rosa delle direzioni) e **tabellone 3D**
   girevole con le pedine come gettoni e sopra i modellini d'epoca (scafo bianco, muso rosso e strisce del
   colore del lato, come sulla copertina), missili, pianeti e asteroidi. Si passa dall'una all'altro con
   **2D / 3D**.
 - **Scheda dell'unità** come lo Spaceship Log: compartimenti con V/D/X, energia, missili per modulo,
   caccia, comandi di battaglia.
-- **Replay finale** di tutta la partita senza interruzioni: movimenti animati esagono per esagono, raggi,
-  esplosioni e lanci; pausa, velocità ½×-4× e cursore; funziona in 2D e in 3D.
+- **Replay finale** continuo e simultaneo: in ogni turno tutte le unità dei due lati si muovono insieme,
+  ciascuna alla sua velocità, mentre laser, particelle e missili partono in tempo reale dalle navi in
+  movimento; pausa, velocità ½×-4× e cursore; funziona in 2D e in 3D (`scripts/ui/replay.gd`).
+- **Effetti diversi per ogni tipo di fuoco**: raffica laser (un dardo rosso), sbarramento laser (cinque dardi
+  a raffica), raffica di particelle (un globo di plasma con la scia), sbarramento di particelle (tre globi che
+  convergono legati da fulmini); impatti con scintille, esplosioni con lampo, palla di fuoco, onda d'urto,
+  detriti e fumo (`scripts/ui/fx2d.gd` e `board_3d.gd`).
+- **Illustrazioni** delle 12 classi di astronavi, dei caccia, dei missili e dei 23 moduli: nel menu, nella scheda
+  dell'unità (stile Spaceship Log illustrato, `scripts/ui/ship_card.gd`), nel fuoco e nelle regole.
 - **Regole** riassunte in italiano con tutte le tabelle, dal menu e in partita.
 
 ## Comandi

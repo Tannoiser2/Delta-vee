@@ -114,7 +114,7 @@ func _ready() -> void:
 	for k in ["hunter", "light", "heavy", "arsenal", "bcomm", "tractor", "bcpod", "jump", "ajump", "energy",
 			"luxury", "cabin", "crew", "medical", "bio", "cargo", "bcargo", "living", "lander", "survey", "equip", "explorer", "escape"]:
 		var card := PanelContainer.new()
-		card.add_theme_stylebox_override("panel", UI.panel_style(Color("#0c0b10"), UI.HEX_D, 2, 4))
+		card.add_theme_stylebox_override("panel", UI.panel_style(UI.PANEL, UI.METAL_D, 2, 4))
 		var cv := VBoxContainer.new()
 		cv.add_theme_constant_override("separation", 4)
 		card.add_child(cv)

@@ -132,9 +132,9 @@ func _update_cam() -> void:
 	cam.look_at(target, Vector3.UP)
 
 
-func fit() -> void:
+func fit(all_maps := false) -> void:
 	var r := _bounds()
-	var ub := _units_bounds()
+	var ub := _units_bounds() if not all_maps else Rect2()
 	if ub.size.x > 0:
 		r = ub
 	target = Vector3(r.get_center().x, 0, r.get_center().y)
@@ -313,7 +313,7 @@ class TileDraw extends Node2D:
 		var logo := "DeltaVee"
 		var fs := int(k * 2.1)
 		var lw := UI.font_title.get_string_size(logo, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		draw_string(UI.font_title, cc + Vector2(-lw / 2, -k * 1.6), logo, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.85, 0.83, 0.8, 0.5))
+		draw_string(UI.font_title, cc + Vector2(-lw / 2, -k * 1.6), logo, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.85, 0.83, 0.8, 0.16))
 		for d in 12:
 			var v := Hex.dir_vec(d)
 			var c2 := cc + Vector2(0, k * 1.2)
@@ -792,37 +792,9 @@ func _draw_fx() -> void:
 			continue
 		match f["k"]:
 			"beam":
-				var a: Vector2 = f["a"]
-				var b: Vector2 = f["b"]
-				if not f["hit"]:
-					b = b + (b - a).orthogonal().normalized() * 0.6
-				var k := clampf(t / 0.35, 0.0, 1.0)
-				var tip := a.lerp(b, k)
-				var col := UI.CYAN if str(f["w"]).begins_with("p") else Color(1.0, 0.25, 0.2)
-				var beam := MeshInstance3D.new()
-				var len := (tip - a).length()
-				if len < 0.01:
-					continue
-				beam.mesh = _cyl(0.035, len)
-				var m := StandardMaterial3D.new()
-				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-				m.albedo_color = col
-				m.emission_enabled = true
-				m.emission = col
-				m.emission_energy_multiplier = 3.0
-				beam.material_override = m
-				var mid := (a + tip) * 0.5
-				beam.position = Vector3(mid.x, 0.6, mid.y)
-				var dir3 := Vector3(tip.x - a.x, 0, tip.y - a.y).normalized()
-				beam.basis = Basis(Quaternion(Vector3.UP, dir3))
-				root3.add_child(beam)
-				_fx_nodes.append(beam)
-				if f["hit"] and k >= 1.0:
-					_flash(Vector3(b.x, 0.6, b.y), 0.35 + t * 0.4, Color(1.0, 0.9, 0.5), 1.0 - t)
+				_shot3(f["a"], f["b"], str(f["w"]), bool(f["hit"]), t)
 			"boom":
-				var c: Vector2 = f["p"]
-				_flash(Vector3(c.x, 0.55, c.y), 0.3 + t * 1.3, Color(1.0, 0.55, 0.15), 1.0 - t)
-				_flash(Vector3(c.x, 0.55, c.y), 0.2 + t * 0.7, Color(1.0, 0.95, 0.6), 1.0 - t)
+				_boom3(f["p"], t)
 			"spark":
 				var c: Vector2 = f["p"]
 				_flash(Vector3(c.x, 0.55, c.y), 0.2 + t * 0.5, UI.CYAN, (1.0 - t) * 0.6)
@@ -832,6 +804,176 @@ func _draw_fx() -> void:
 			"puff":
 				var c: Vector2 = f["p"]
 				_flash(Vector3(c.x, 0.5, c.y), 0.3 + t * 0.4, Color(1, 1, 1), (1.0 - t) * 0.4)
+
+
+var _mats := {}
+
+func _glow(col: Color, al := 1.0) -> StandardMaterial3D:
+	var key := "%s|%.2f" % [col.to_html(), snappedf(al, 0.05)]
+	if _mats.has(key):
+		return _mats[key]
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(col, al)
+	if al < 1.0:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.emission_enabled = true
+	m.emission = col
+	m.emission_energy_multiplier = 2.5
+	_mats[key] = m
+	return m
+
+
+func _fxmesh(mesh: Mesh, mat: Material, pos: Vector3, basis := Basis.IDENTITY) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.basis = basis
+	mi.position = pos
+	root3.add_child(mi)
+	_fx_nodes.append(mi)
+	return mi
+
+
+func _light(p: Vector3, col: Color, e: float, r := 3.0) -> void:
+	var l := OmniLight3D.new()
+	l.light_color = col
+	l.light_energy = e
+	l.omni_range = r
+	l.position = p
+	root3.add_child(l)
+	_fx_nodes.append(l)
+
+
+## colpi diversi per tipo di fuoco (stessi tempi dell'effetto 2D)
+func _shot3(a2: Vector2, b2: Vector2, w: String, hit: bool, t: float) -> void:
+	var a := Vector3(a2.x, 0.6, a2.y)
+	var b := Vector3(b2.x, 0.6, b2.y)
+	var dir := (b - a)
+	if dir.length() < 0.01:
+		dir = Vector3(1, 0, 0)
+	dir = dir.normalized()
+	var nrm := Vector3(-dir.z, 0, dir.x)
+	var end := b if hit else b + nrm * 0.8 + dir * 1.6
+	var pt: Array = FX2D.pattern(w)
+	var particle := w.begins_with("p")
+	var col := FX2D.PLASMA if particle else FX2D.LASER
+	var arrive := 0.0
+	var q := Basis(Quaternion(Vector3.UP, dir))
+	if t < 0.14 + float(pt[1]) * int(pt[0]):
+		_flash(a + dir * 0.45, 0.16, col, 0.9)
+	for i in int(pt[0]):
+		var t0: float = i * pt[1]
+		var k: float = (t - t0) / pt[2]
+		arrive = maxf(arrive, t0 + pt[2])
+		if k < 0.0 or k > 1.0:
+			continue
+		var lat := 0.0
+		if w == "lbb":
+			lat = (float(i) - 2.0) * 0.06
+		elif w == "pbb":
+			lat = (float(i) - 1.0) * 0.9 * 4.0 * k * (1.0 - k)
+		var head := a.lerp(end, k) + nrm * lat
+		if particle:
+			var r := 0.22 if w == "pbb" else 0.18
+			var sp := SphereMesh.new()
+			sp.radius = r
+			sp.height = r * 2
+			_fxmesh(sp, _glow(Color(1, 1, 1)), head)
+			var halo := SphereMesh.new()
+			halo.radius = r * 1.9
+			halo.height = r * 3.8
+			_fxmesh(halo, _glow(FX2D.PLASMA, 0.35), head)
+			for j in 4:
+				var tr := SphereMesh.new()
+				tr.radius = r * (0.8 - j * 0.15)
+				tr.height = tr.radius * 2
+				_fxmesh(tr, _glow(FX2D.PLASMA2, 0.3 - j * 0.06), head - dir * 0.14 * (j + 1))
+			_light(head, FX2D.PLASMA, 2.5, 2.5)
+		else:
+			var L := 0.9 if w == "lb" else 0.6
+			var c2: Color = FX2D.LASER if (w == "lb" or i % 2 == 0) else FX2D.LASER2
+			var bolt := CylinderMesh.new()
+			bolt.top_radius = 0.035
+			bolt.bottom_radius = 0.035
+			bolt.height = L
+			bolt.radial_segments = 8
+			_fxmesh(bolt, _glow(Color(1, 0.95, 0.85)), head - dir * L * 0.5, q)
+			var gl := CylinderMesh.new()
+			gl.top_radius = 0.09
+			gl.bottom_radius = 0.09
+			gl.height = L * 1.1
+			gl.radial_segments = 8
+			_fxmesh(gl, _glow(c2, 0.4), head - dir * L * 0.5, q)
+			_light(head, c2, 2.0, 2.0)
+	if w == "pbb" and t < arrive:
+		# fulmini fra la nave e i globi
+		var r := RandomNumberGenerator.new()
+		r.seed = int(t * 40.0)
+		var tip := a.lerp(end, clampf(t / arrive, 0.0, 1.0))
+		var prev := a
+		for j in 7:
+			var p2 := a.lerp(tip, float(j + 1) / 7.0) + nrm * r.randf_range(-0.25, 0.25) + Vector3(0, r.randf_range(-0.15, 0.15), 0)
+			var seg := p2 - prev
+			if seg.length() > 0.01:
+				var cy := CylinderMesh.new()
+				cy.top_radius = 0.02
+				cy.bottom_radius = 0.02
+				cy.height = seg.length()
+				cy.radial_segments = 4
+				_fxmesh(cy, _glow(FX2D.PLASMA2, 0.85), (prev + p2) * 0.5, Basis(Quaternion(Vector3.UP, seg.normalized())))
+			prev = p2
+	if hit and t >= arrive * 0.95:
+		var k := clampf((t - arrive) / maxf(0.01, 1.0 - arrive), 0.0, 1.0)
+		var big := w.ends_with("bb")
+		_flash(b, (0.25 + 0.5 * k) * (1.3 if big else 1.0), Color(1, 0.95, 0.8), 1.0 - k)
+		_flash(b, (0.4 + 0.8 * k) * (1.3 if big else 1.0), col, (1.0 - k) * 0.5)
+		var r := RandomNumberGenerator.new()
+		r.seed = int(b.x * 13 + b.z * 7)
+		for i in (14 if big else 9):
+			var ang := atan2(dir.z, dir.x) + r.randf_range(-1.6, 1.6)
+			var v := Vector3(cos(ang), r.randf_range(-0.3, 0.8), sin(ang)).normalized()
+			var bx := BoxMesh.new()
+			bx.size = Vector3(0.05, 0.05, 0.05)
+			_fxmesh(bx, _glow(Color("#ffe39a") if not particle else Color.WHITE, 1.0 - k), b + v * r.randf_range(0.6, 1.4) * 1.2 * k)
+
+
+func _boom3(c2: Vector2, t: float) -> void:
+	var c := Vector3(c2.x, 0.55, c2.y)
+	var r := RandomNumberGenerator.new()
+	r.seed = int(c2.x * 13 + c2.y * 7)
+	if t < 0.22:
+		_flash(c, 0.5 + 3.0 * t, Color(1, 1, 1), 1.0 - t / 0.22)
+	var fc: Color
+	if t < 0.3:
+		fc = Color("#fff3a0").lerp(Color("#ffb030"), t / 0.3)
+	elif t < 0.6:
+		fc = Color("#ffb030").lerp(Color("#e0402a"), (t - 0.3) / 0.3)
+	else:
+		fc = Color("#e0402a").lerp(Color("#3a2a28"), (t - 0.6) / 0.4)
+	for i in 7:
+		var off := Vector3(r.randf_range(-1, 1), r.randf_range(-0.6, 1), r.randf_range(-1, 1)) * 0.45 * sqrt(t)
+		var rad := (0.22 + 0.6 * sqrt(t)) * r.randf_range(0.6, 1.1)
+		var sp := SphereMesh.new()
+		sp.radius = rad
+		sp.height = rad * 2
+		sp.radial_segments = 12
+		sp.rings = 6
+		_fxmesh(sp, _glow(fc, clampf(0.8 * pow(1.0 - t, 1.2), 0.0, 1.0)), c + off)
+	# onda d'urto
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.3 + 2.4 * t
+	ring.outer_radius = ring.inner_radius + 0.08 * (1.0 - t) + 0.02
+	ring.rings = 32
+	_fxmesh(ring, _glow(Color(1.0, 0.85, 0.6), clampf(0.8 * (1.0 - t), 0.0, 1.0)), c)
+	# detriti
+	for i in 18:
+		var v := Vector3(r.randf_range(-1, 1), r.randf_range(-0.4, 1), r.randf_range(-1, 1)).normalized()
+		var sp := r.randf_range(0.8, 2.4)
+		var bx := BoxMesh.new()
+		bx.size = Vector3(0.07, 0.05, 0.12)
+		_fxmesh(bx, _glow(Color("#ffd27a").lerp(Color("#c0402a"), t), clampf(1.0 - t, 0.0, 1.0)), c + v * sp * (1.0 - pow(1.0 - t, 2.0)), Basis.from_euler(Vector3(t * 9 + i, t * 7, i)))
+	_light(c, Color(1.0, 0.6, 0.25), 6.0 * (1.0 - t), 5.0)
 
 
 func _flash(p: Vector3, r: float, col: Color, al: float) -> void:

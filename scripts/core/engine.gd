@@ -1568,7 +1568,7 @@ func _shoot(side: int, r: Dictionary) -> bool:
 	if ch <= 0:
 		log_msg(desc + ": colpo impossibile.")
 		_rec({"k": "fire", "a": u["id"], "t": t["id"], "w": w, "hit": false})
-		await _pace(0.5)
+		await _pace(1.0)
 		return true
 	var hit := true
 	var roll := 0
@@ -1577,12 +1577,12 @@ func _shoot(side: int, r: Dictionary) -> bool:
 		hit = roll <= ch
 	log_msg(desc + (", serve ≤%d, dado %d: " % [ch, roll] if ch < 99 else ", colpo automatico: ") + ("COLPITO!" if hit else "mancato."))
 	_rec({"k": "fire", "a": u["id"], "t": t["id"], "w": w, "hit": hit})
-	await _pace(0.7)
+	await _pace(1.0)
 	if hit:
 		await _apply_hit(t, d10(), side)
 		if t["st"] == "dead":
 			_rec({"k": "boom", "at": t["hex"], "id": t["id"]})
-			await _pace(0.5)
+			await _pace(1.0)
 	return true
 
 
