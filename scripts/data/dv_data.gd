@@ -39,8 +39,50 @@ const PODS := {
 	"support":  {"name": "Supporto vitale", "short": "Supporto", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
 	"cargo":    {"name": "Stiva", "short": "Stiva", "lp": false, "bcmd": 0, "jump": false, "fires": 0, "cargo": true},
 	"bcargo":   {"name": "Stiva schermata", "short": "Stiva sch.", "lp": false, "bcmd": 0, "jump": false, "fires": 0, "cargo": true},
-	"equip":    {"name": "Attrezzature", "short": "Attrezz.", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
+	"equip":    {"name": "Robot e attrezzature", "short": "Attrezz.", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
+	# moduli senza effetto sul gioco [5.7] non usati dagli scenari, per partite inventate e per la galleria
+	"luxury":   {"name": "Cabina di lusso", "short": "Lusso", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
+	"medical":  {"name": "Infermeria avanzata", "short": "Infermeria", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
+	"bio":      {"name": "Ricerca biologica", "short": "Bio", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
+	"living":   {"name": "Stiva per carichi vivi", "short": "Stiva viva", "lp": false, "bcmd": 0, "jump": false, "fires": 0, "cargo": true},
+	"lander":   {"name": "Modulo di atterraggio", "short": "Lander", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
+	"survey":   {"name": "Rilevamento", "short": "Rilev.", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
+	"explorer": {"name": "Esplorazione", "short": "Esplor.", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
+	"escape":   {"name": "Salvataggio / EVA", "short": "EVA", "lp": false, "bcmd": 0, "jump": false, "fires": 0},
 }
+
+## immagine del modulo (assets/pods); il supporto vitale usa la serra della ricerca biologica
+const POD_IMG := {"support": "bio"}
+
+## descrizione breve dei moduli, per la galleria delle regole
+const POD_TEXT := {
+	"hunter": "Laser e particelle; 2 missili non guidati e 1 intelligente senza preparazione. Contiene un motore di salto. Nessun comando di battaglia.",
+	"light": "Laser e particelle; 5 non guidati e 3 guidati, da preparare. 1 comando di battaglia.",
+	"heavy": "Laser e particelle; 6 non guidati, 5 guidati, 3 intelligenti e 1 MIMS (questi da preparare). 1 comando di battaglia.",
+	"arsenal": "Due fuochi o lanci per fase; 8 non guidati, 7 guidati, 5 intelligenti e 2 MIMS. 1 comando di battaglia.",
+	"bcomm": "2 comandi di battaglia, un fuoco in più dalla nave, puntamento −6 per tutta la nave, ricerca attiva a 10 esagoni.",
+	"tractor": "Dà comandi di manovra a un'altra nave o caccia, anche nemica: 1 entro 4 esagoni (civiltà 7), 2 entro 6 (civiltà 8).",
+	"bcpod": "Hangar di un caccia Terwillicker-5000 o Terwillicker-X: si prepara e si lancia in due fasi di comando.",
+	"jump": "Permette il salto nell'iperspazio, dove lo scenario lo consente: prepara salto, poi salta.",
+	"ajump": "Salto nell'iperspazio senza la fase di preparazione.",
+	"energy": "144 unità di energia in più, spese per prime.",
+	"luxury": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"cabin": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"crew": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"medical": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"bio": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"cargo": "Nessun effetto sul gioco; nello scenario 5 ogni stiva vale punti.",
+	"bcargo": "Nessun effetto sul gioco; nello scenario 5 ogni stiva vale punti.",
+	"living": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"lander": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"survey": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"equip": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"explorer": "Nessun effetto sul gioco; può contare per la vittoria.",
+	"escape": "Nessun effetto sul gioco; può contare per la vittoria.",
+}
+
+static func pod_img(t: String) -> String:
+	return "res://assets/pods/%s.webp" % POD_IMG.get(t, t)
 
 const MTYPES := ["ug", "g", "i", "m"]
 const MNAME := {"ug": "non guidato", "g": "guidato", "i": "intelligente", "m": "MIMS"}

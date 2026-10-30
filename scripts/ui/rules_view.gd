@@ -105,6 +105,23 @@ func _ready() -> void:
 	rt.add_theme_font_size_override("bold_font_size", 21)
 	rt.text = TEXT
 	inner.add_child(rt)
+	inner.add_child(UI.title("I moduli (pod)", 34))
+	var gal := GridContainer.new()
+	gal.columns = 3
+	gal.add_theme_constant_override("h_separation", 18)
+	gal.add_theme_constant_override("v_separation", 18)
+	inner.add_child(gal)
+	for k in ["hunter", "light", "heavy", "arsenal", "bcomm", "tractor", "bcpod", "jump", "ajump", "energy",
+			"luxury", "cabin", "crew", "medical", "bio", "cargo", "bcargo", "living", "lander", "survey", "equip", "explorer", "escape"]:
+		var card := PanelContainer.new()
+		card.add_theme_stylebox_override("panel", UI.panel_style(Color("#0c0b10"), UI.HEX_D, 2, 4))
+		var cv := VBoxContainer.new()
+		cv.add_theme_constant_override("separation", 4)
+		card.add_child(cv)
+		cv.add_child(UI.icon_rect(UI.tex(D.pod_img(k)), Vector2(520, 200)))
+		cv.add_child(UI.label(D.PODS[k]["name"].to_upper(), 20, UI.YELLOW, UI.font_bold))
+		cv.add_child(UI.wrap(UI.label(D.POD_TEXT.get(k, ""), 17, UI.TEXT, UI.font_body), 520))
+		gal.add_child(card)
 	inner.add_child(UI.title("Tabelle", 34))
 	var rt2 := RichTextLabel.new()
 	rt2.bbcode_enabled = true

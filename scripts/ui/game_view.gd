@@ -427,12 +427,28 @@ func _box(st: int, armor := -1) -> Control:
 	return p
 
 
-func _comp_row(vb: VBoxContainer, name: String, armor: int, st: int, extra := "") -> void:
+func _comp_row(vb: VBoxContainer, name: String, armor: int, st: int, extra := "", pod := "") -> void:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 8)
 	h.add_child(_box(st))
+	if pod != "":
+		# miniatura del modulo: un clic la ingrandisce
+		var tb := TextureButton.new()
+		tb.texture_normal = UI.tex(D.pod_img(pod))
+		tb.ignore_texture_size = true
+		tb.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_COVERED
+		tb.custom_minimum_size = Vector2(78, 32)
+		tb.tooltip_text = "%s — tocca per ingrandire" % D.PODS[pod]["name"]
+		if st == 3:
+			tb.modulate = Color(0.55, 0.4, 0.38)
+		elif st == 2:
+			tb.modulate = Color(0.9, 0.75, 0.7)
+		var key := pod
+		tb.pressed.connect(func(): _pod_zoom(vb, h, key))
+		h.add_child(tb)
 	var l := UI.label(name, 17, UI.INK if st < 3 else Color("#8a4a3a"), UI.font_semi)
-	l.custom_minimum_size.x = 180
+	l.custom_minimum_size.x = 180 if pod == "" else 150
+	l.clip_text = true
 	h.add_child(l)
 	h.add_child(UI.label("cor. %d" % armor, 15, Color("#666"), UI.font_body))
 	if extra != "":
@@ -441,6 +457,28 @@ func _comp_row(vb: VBoxContainer, name: String, armor: int, st: int, extra := ""
 		e.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		h.add_child(e)
 	vb.add_child(h)
+
+
+var _zoom_node: Control
+var _zoom_key := ""
+
+## immagine grande del modulo sotto la sua riga (un secondo clic la chiude)
+func _pod_zoom(vb: VBoxContainer, row: Control, key: String) -> void:
+	var same := _zoom_key == key and is_instance_valid(_zoom_node)
+	if is_instance_valid(_zoom_node):
+		_zoom_node.queue_free()
+	_zoom_key = ""
+	if same:
+		return
+	_zoom_key = key
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	var img := UI.icon_rect(UI.tex(D.pod_img(key)), Vector2(PANEL_W - 60, (PANEL_W - 60) * 0.39))
+	box.add_child(img)
+	box.add_child(UI.wrap(UI.label(D.PODS[key]["name"].to_upper() + " — " + D.POD_TEXT.get(key, ""), 15, Color("#333"), UI.font_body), PANEL_W - 60))
+	vb.add_child(box)
+	vb.move_child(box, row.get_index() + 1)
+	_zoom_node = box
 
 
 func _card_ship(vb: VBoxContainer, u: Dictionary, mine: bool) -> void:
@@ -493,7 +531,7 @@ func _card_ship(vb: VBoxContainer, u: Dictionary, mine: bool) -> void:
 			extra = "%s: %s" % [b["label"], {"dock": "a bordo", "prep": "pronto", "on": "in volo", "dead": "perso"}.get(b["st"], b["st"])]
 		if p["t"] == "tractor":
 			extra = "civiltà %d" % p["civ"]
-		_comp_row(vb, "%d. %s" % [i + 1, pd["name"]], p["armor"], engine.pod_state(u, i), extra)
+		_comp_row(vb, "%d. %s" % [i + 1, pd["name"]], p["armor"], engine.pod_state(u, i), extra, p["t"])
 	var prep := engine.prepared_of(u)
 	if not prep.is_empty() and (mine or ended):
 		var names := []
@@ -1298,7 +1336,14 @@ func _build_fire() -> void:
 				_txt("Comunicazioni di battaglia: un fuoco in più da una qualsiasi arma.", UI.MUTED, 16)
 			for src in engine.fire_sources(u):
 				var name := "Burster (classe %d)" % engine.sdef(u)["burst"] if str(src) == "burst" else "Modulo %d · %s%s" % [int(src) + 1, D.PODS[u["pods"][src]["t"]]["name"], " (danneggiato)" if engine.pod_state(u, src) == 2 else ""]
-				act_box.add_child(UI.label(name, 18, UI.YELLOW, UI.font_semi))
+				if str(src) == "burst":
+					act_box.add_child(UI.label(name, 18, UI.YELLOW, UI.font_semi))
+				else:
+					var hr := HBoxContainer.new()
+					hr.add_theme_constant_override("separation", 8)
+					hr.add_child(UI.icon_rect(UI.tex(D.pod_img(u["pods"][src]["t"])), Vector2(70, 28)))
+					hr.add_child(UI.label(name, 18, UI.YELLOW, UI.font_semi))
+					act_box.add_child(hr)
 				var g := HFlowContainer.new()
 				g.add_theme_constant_override("h_separation", 6)
 				g.add_theme_constant_override("v_separation", 6)
@@ -1510,7 +1555,12 @@ func _build_hitpart() -> void:
 	for p in pending["options"]:
 		var st := engine.part_state(t, p)
 		var pp: String = p
-		_btn("%s  [%s]" % [engine.part_name(t, p).capitalize(), ["intatto", "vulnerabile", "danneggiato", "distrutto"][st]], func(): _submit(pp))
+		var b := _btn("%s  [%s]" % [engine.part_name(t, p).capitalize(), ["intatto", "vulnerabile", "danneggiato", "distrutto"][st]], func(): _submit(pp))
+		if p.begins_with("p"):
+			b.icon = UI.tex(D.pod_img(t["pods"][int(p.substr(1)) - 1]["t"]))
+			b.expand_icon = true
+			b.custom_minimum_size.y = 52
+			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 
 # ================================================================ fine partita e replay
