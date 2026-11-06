@@ -40,7 +40,7 @@ const CH := {
 	],
 	"dec_cmd": [
 		{"t": "Fase di comando",
-		"x": "Qui decidi la manovra per il prossimo movimento. La [color=#f4e46a]linea gialla[/color] sulla mappa mostra dove andrà la nave con gli ordini attuali.\n\nOgni manovra consuma energia: la nave ha pochi blocchi di energia, guardali nella scheda a destra."},
+		"x": "Qui decidi la manovra per il prossimo movimento. La [color=#f4e46a]linea gialla[/color] sulla mappa mostra dove andrà la nave con gli ordini attuali.\n\nOgni manovra consuma energia: i blocchi rimasti sono nella barra arancione sotto il nome della nave. Le schede Caratteristiche e Moduli mostrano il resto della nave."},
 		{"t": "Velocità",
 		"x": "Con [b]meno[/b] e [b]più[/b] cambi la velocità. C'è un limite per turno e ogni cambio costa energia.",
 		"hl": ["−", "+"]},

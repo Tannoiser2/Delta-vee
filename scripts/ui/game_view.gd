@@ -16,8 +16,15 @@ var board3d
 var view3d := false
 var board_area: Control
 var right: VBoxContainer
-var card_box: VBoxContainer
-var act_box: VBoxContainer
+var head_box: VBoxContainer      # intestazione fissa dell'unità scelta
+var act_box: VBoxContainer       # scheda Ordini
+var car_box: VBoxContainer       # scheda Caratteristiche
+var mod_box: VBoxContainer       # scheda Moduli
+var foot_box: VBoxContainer      # pulsanti di fine fase, sempre visibili
+var tab := "ord"
+var tab_btns := {}
+var tab_scroll := {}
+var pod_detail := -1
 var phase_lbl: Label
 var status_lbl: Label
 var log_lbl: RichTextLabel
@@ -247,19 +254,48 @@ func _build() -> void:
 	rp.offset_left = -PANEL_W
 	rp.offset_top = TOP_H
 	add_child(rp)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	rp.add_child(scroll)
+	# pannello a schede: intestazione fissa, tre schede, pulsanti di fine fase
 	right = VBoxContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 10)
-	scroll.add_child(right)
-	act_box = VBoxContainer.new()
-	act_box.add_theme_constant_override("separation", 8)
-	right.add_child(act_box)
-	card_box = VBoxContainer.new()
-	card_box.add_theme_constant_override("separation", 6)
-	right.add_child(card_box)
+	right.add_theme_constant_override("separation", 8)
+	rp.add_child(right)
+	head_box = VBoxContainer.new()
+	right.add_child(head_box)
+	var tb := HBoxContainer.new()
+	tb.add_theme_constant_override("separation", 4)
+	right.add_child(tb)
+	for t in [["ord", "Ordini"], ["car", "Caratteristiche"], ["mod", "Moduli"]]:
+		var b := UI.button(t[1], 0, 40, 18)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.focus_mode = Control.FOCUS_NONE
+		var k: String = t[0]
+		b.pressed.connect(func(): _show_tab(k))
+		tb.add_child(b)
+		tab_btns[k] = b
+	var under := ColorRect.new()
+	under.color = UI.STRIPE
+	under.custom_minimum_size = Vector2(0, 3)
+	right.add_child(under)
+	for k in ["ord", "car", "mod"]:
+		var tsc := ScrollContainer.new()
+		tsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		tsc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		right.add_child(tsc)
+		var vb := VBoxContainer.new()
+		vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		vb.add_theme_constant_override("separation", 7)
+		tsc.add_child(vb)
+		tab_scroll[k] = tsc
+		match k:
+			"ord":
+				act_box = vb
+			"car":
+				car_box = vb
+			"mod":
+				mod_box = vb
+	foot_box = VBoxContainer.new()
+	foot_box.add_theme_constant_override("separation", 6)
+	right.add_child(foot_box)
+	_show_tab("ord")
 
 
 func _apply_view() -> void:
@@ -438,18 +474,62 @@ func _refresh_labels() -> void:
 
 # ================================================================ scheda dell'unità (Spaceship Log)
 
+var _card_sel := ""
+
+
 func _card() -> void:
-	for c in card_box.get_children():
-		c.queue_free()
+	for box in [head_box, car_box, mod_box]:
+		for c in box.get_children():
+			c.queue_free()
+	var w := PANEL_W - 24
+	if sel != _card_sel:
+		pod_detail = -1
+		_card_sel = sel
 	if sel == "" or not engine.units.has(sel):
-		var hint := UI.label("Tocca una pedina sulla mappa per vederne la scheda.", 18, UI.MUTED)
-		card_box.add_child(UI.wrap(hint, PANEL_W - 30))
+		var hint := UI.label("Nessuna unità scelta: tocca una pedina sulla mappa per vederne la scheda.", 17, UI.MUTED, UI.font_semi)
+		head_box.add_child(UI.wrap(hint, w))
+		car_box.add_child(UI.wrap(UI.label("Tocca una pedina sulla mappa per vederne le caratteristiche.", 17, UI.MUTED), w))
 		_legend()
+		mod_box.add_child(UI.wrap(UI.label("Tocca un'astronave per vederne i moduli.", 17, UI.MUTED), w))
+		_tab_state(false)
 		return
 	var u: Dictionary = engine.units[sel]
 	var mine: bool = u["side"] in viewer()
 	var hidden: bool = not u["rev"] and not mine
-	card_box.add_child(ShipCard.build(engine, u, hidden, mine or ended or replaying, PANEL_W - 36))
+	var full: bool = mine or ended or replaying
+	head_box.add_child(ShipCard.header(engine, u, hidden, full, w))
+	car_box.add_child(ShipCard.stats(engine, u, hidden, full, w))
+	var has_pods: bool = not hidden and u["kind"] == "ship" and not u["pods"].is_empty()
+	if has_pods:
+		mod_box.add_child(ShipCard.pods(engine, u, full, w, pod_detail, func(i: int):
+			pod_detail = i
+			_card()))
+	else:
+		mod_box.add_child(UI.wrap(UI.label("Questa unità non ha moduli.", 17, UI.MUTED), w))
+	_tab_state(has_pods)
+
+
+func _tab_state(has_pods: bool) -> void:
+	tab_btns["mod"].disabled = not has_pods
+	if tab == "mod" and not has_pods:
+		_show_tab("car")
+
+
+func _show_tab(k: String) -> void:
+	tab = k
+	for t in tab_scroll:
+		tab_scroll[t].visible = t == k
+		var b: Button = tab_btns[t]
+		if t == k:
+			for st in ["normal", "hover", "pressed", "focus"]:
+				b.add_theme_stylebox_override(st, UI._btn(Color("#3a2a14"), UI.YELLOW))
+			b.add_theme_color_override("font_color", UI.YELLOW)
+			b.add_theme_color_override("font_hover_color", UI.YELLOW)
+		else:
+			for st in ["normal", "hover", "pressed", "focus"]:
+				b.remove_theme_stylebox_override(st)
+			b.remove_theme_color_override("font_color")
+			b.remove_theme_color_override("font_hover_color")
 
 
 func _legend() -> void:
@@ -459,10 +539,10 @@ func _legend() -> void:
 	rt.fit_content = true
 	rt.text = t
 	rt.custom_minimum_size = Vector2(PANEL_W - 30, 0)
-	rt.add_theme_font_size_override("normal_font_size", 17)
-	rt.add_theme_font_size_override("bold_font_size", 18)
+	rt.add_theme_font_size_override("normal_font_size", 16)
+	rt.add_theme_font_size_override("bold_font_size", 17)
 	rt.add_theme_color_override("default_color", UI.MUTED)
-	card_box.add_child(rt)
+	car_box.add_child(rt)
 
 
 # ================================================================ selezione e clic
@@ -508,6 +588,8 @@ func _on_hex_click(h: Vector2i) -> void:
 
 func select(id: String) -> void:
 	sel = id
+	if pending.is_empty() and tab == "ord" and id != "":
+		_show_tab("car")
 	if pending.get("type", "") in ["cmd", "fire"]:
 		mode = ""
 		aux = {}
@@ -598,6 +680,7 @@ func _preview(u: Dictionary) -> Array:
 
 func _on_decision(req: Dictionary) -> void:
 	pending = req
+	_show_tab("ord")
 	_wait_text = ""
 	plan = {}
 	mode = ""
@@ -655,6 +738,16 @@ func _submit(r) -> void:
 func _clear_box() -> void:
 	for c in act_box.get_children():
 		c.queue_free()
+	for c in foot_box.get_children():
+		c.queue_free()
+
+
+## riga di pulsanti nella fascia fissa in basso
+func _foot_row() -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
+	foot_box.add_child(h)
+	return h
 
 
 func _own_units(side: int) -> Array:
@@ -678,7 +771,7 @@ func _fire_units(side: int) -> Array:
 	return out
 
 
-func _txt(t: String, col := UI.TEXT, size := 18, font: Font = null) -> Label:
+func _txt(t: String, col := UI.TEXT, size := 16, font: Font = null) -> Label:
 	var l := UI.label(t, size, col, font if font != null else UI.font_body)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.custom_minimum_size.x = PANEL_W - 30
@@ -687,7 +780,7 @@ func _txt(t: String, col := UI.TEXT, size := 18, font: Font = null) -> Label:
 
 
 func _btn(t: String, cb: Callable, primary := false, w := 0.0, parent: Control = null) -> Button:
-	var b := UI.button(t, w, 42, 18)
+	var b := UI.button(t, w, 38, 17)
 	if primary:
 		UI.primary(b)
 	b.pressed.connect(func(): main.sfx("clic", -8.0))
@@ -709,7 +802,7 @@ func _build_decision() -> void:
 	_clear_box()
 	if pending.is_empty():
 		return
-	var head := UI.title({"cmd": "Fase di comando", "fire": "Fase di fuoco", "deploy": "Schieramento", "planet": "Gravità del pianeta", "hitpart": "Parte colpita"}.get(pending["type"], ""), 30)
+	var head := UI.title({"cmd": "Fase di comando", "fire": "Fase di fuoco", "deploy": "Schieramento", "planet": "Gravità del pianeta", "hitpart": "Parte colpita"}.get(pending["type"], ""), 26)
 	act_box.add_child(head)
 	match str(pending["type"]):
 		"cmd":
@@ -733,13 +826,13 @@ func _unit_strip(units: Array, mark: Callable) -> void:
 	act_box.add_child(g)
 	for u in units:
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(76, 78)
+		b.custom_minimum_size = Vector2(62, 62)
 		b.icon = UI.counter_tex(u["side"], u["kind"], u["cls"], u["label"])
 		b.expand_icon = true
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		b.text = str(mark.call(u))
-		b.add_theme_font_size_override("font_size", 14)
+		b.add_theme_font_size_override("font_size", 13)
 		b.tooltip_text = engine.uname(u)
 		if u["id"] == sel:
 			b.add_theme_stylebox_override("normal", UI._btn(Color("#3a2a14"), UI.YELLOW))
@@ -787,7 +880,6 @@ func _build_cmd() -> void:
 		_txt("Scegliete una vostra unità.", UI.MUTED)
 		_cmd_footer()
 		return
-	act_box.add_child(UI.heading(engine.uname(u), 22, UI.SIDE[side]))
 	_cmd_maneuver(u)
 	if u["kind"] == "ship":
 		_cmd_battle(u)
@@ -896,8 +988,8 @@ func _cmd_maneuver(u: Dictionary) -> void:
 			_btn("Annulla lo scarto (in %s)" % engine.hcode(w), func():
 				o["w"] = null
 				_rebuild(), false, 0, r3)
-	var r4 := _row()
-	_btn("Azzera gli ordini dell'unità", func():
+	var r4: HBoxContainer = act_box.get_child(act_box.get_child_count() - 1) if u["kind"] != "mis" else _row()
+	_btn("Azzera unità", func():
 		plan["m"].erase(u["id"])
 		mode = ""
 		_rebuild(), false, 0, r4)
@@ -1107,8 +1199,7 @@ func _bc_text(b: Dictionary) -> String:
 
 
 func _cmd_footer() -> void:
-	act_box.add_child(HSeparator.new())
-	var r := _row()
+	var r := _foot_row()
 	_btn("Suggerisci (IA)", func():
 		var s = engine.ais[int(pending["seat"])].decide(engine, int(pending["seat"]), pending)
 		if s is Dictionary:
@@ -1121,13 +1212,14 @@ func _cmd_footer() -> void:
 		plan = {"m": {}, "b": []}
 		mode = ""
 		_rebuild(), false, 0, r)
+	var rf := _foot_row()
 	_btn("Fine comandi", func():
 		var m := {}
 		for id in plan["m"]:
 			var o: Dictionary = plan["m"][id]
 			if int(o["a"]) != 0 or int(o["t"]) != 0 or o["w"] != null or str(o["j"]) != "":
 				m[id] = o
-		_submit({"m": m, "b": plan["b"]}), true)
+		_submit({"m": m, "b": plan["b"]}), true, 0, rf)
 
 
 func _rebuild() -> void:
@@ -1230,9 +1322,6 @@ func _build_fire() -> void:
 				var r := _mims_plan(u)
 				_submit(r), true)
 		elif engine.fire_budget.has(sel) and u["side"] == side:
-			act_box.add_child(UI.heading(engine.uname(u), 22, UI.SIDE[side]))
-			var en := engine.energy(u)
-			_txt("Energia: %d unità" % en, UI.CYAN, 17, UI.font_semi)
 			if not engine.fire_budget[sel].is_empty() and int(engine.fire_budget[sel].get("x", 0)) > 0:
 				_txt("Comunicazioni di battaglia: un fuoco in più da una qualsiasi arma.", UI.MUTED, 16)
 			for src in engine.fire_sources(u):
@@ -1254,7 +1343,7 @@ func _build_fire() -> void:
 					var ww: String = w
 					var ss = src
 					var b := UI.button("%s%s" % [D.FIRE[w]["name"], (" (%d u.)" % cost) if cost > 0 else ""], 0, 40, 16)
-					b.disabled = en < cost
+					b.disabled = engine.energy(u) < cost
 					if aux.get("w", "") == w and str(aux.get("src", "")) == str(src):
 						UI.primary(b)
 					b.pressed.connect(func():
@@ -1283,8 +1372,7 @@ func _build_fire() -> void:
 				_fire_target_box(u)
 			if mode == "launch":
 				_launch_box(u)
-	act_box.add_child(HSeparator.new())
-	var r := _row()
+	var r := _foot_row()
 	_btn("Suggerisci (IA)", func():
 		var s = engine.ais[side].decide(engine, side, pending)
 		if s is Dictionary and not s.is_empty():
@@ -1412,7 +1500,7 @@ func _build_deploy() -> void:
 			plan["v"] = mini(int(vr[1]), int(plan["v"]) + 1)
 			_rebuild(), false, 44, r)
 	_btn("Conferma lo schieramento", func():
-		_submit({"hex": plan["hex"], "dir": plan["dir"], "v": plan["v"]}), true)
+		_submit({"hex": plan["hex"], "dir": plan["dir"], "v": plan["v"]}), true, 0, _foot_row())
 
 
 func _build_planet() -> void:
@@ -1446,7 +1534,7 @@ func _build_planet() -> void:
 				plan["t"] = t + 1
 			_rebuild(), false, 50, r2)
 	_txt("Comandi usati: %d su %d" % [used, lim["n"]], UI.CYAN)
-	_btn("Conferma", func(): _submit({"a": plan["a"], "t": plan["t"]}), true)
+	_btn("Conferma", func(): _submit({"a": plan["a"], "t": plan["t"]}), true, 0, _foot_row())
 
 
 func _build_hitpart() -> void:

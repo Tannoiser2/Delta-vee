@@ -57,6 +57,10 @@ repository è pubblico).
 - **Tre livelli d'IA** davvero diversi: la facile pianifica poco e non zigzaga, la difficile valuta più
   rotte e più varianti. Nello scenario Pirati! l'IA dei pirati evita di colpire il Corco Mu con i propri
   missili (distruggerlo darebbe il pareggio).
+- **Pannello a schede** a destra: in alto, sempre visibili, l'immagine intera dell'unità, il nome, la
+  posizione e l'energia; sotto, le schede **Ordini** (comandi della fase), **Caratteristiche** (valori e
+  scafo) e **Moduli** (i moduli con le loro immagini; un tocco ne mostra la descrizione). I pulsanti di
+  fine fase restano sempre in fondo e nessuna scheda deve scorrere (`tests/pannello_shot.gd` lo controlla).
 - **Tutorial** guidato sul primo scenario (pulsante **Tutorial** nel menu): spiega pedine, movimento
   newtoniano, fase di comando, fase di fuoco, missili e danni man mano che capitano, e mette in evidenza
   i pulsanti da usare (`scripts/ui/tutor.gd`).

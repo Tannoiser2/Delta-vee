@@ -18,6 +18,328 @@ static func missile_img(mt: String) -> Texture2D:
 	return UI.tex("res://assets/missiles/%s.webp" % mt)
 
 
+# ================================================================ pannello a schede
+# intestazione fissa (immagine intera, nome, posizione, energia) + schede Caratteristiche e Moduli
+
+## nome completo dell'unità come compare nella scheda
+static func full_name(e: DVEngine, u: Dictionary, hidden: bool) -> String:
+	if hidden:
+		return "Pedina coperta"
+	if u["kind"] == "mis":
+		return "%s %s" % [D.MNAME_FULL[u["cls"]], u["label"]]
+	if u["kind"] == "bc":
+		return "%s %s" % [D.SHIPS[u["cls"]]["name"], u["label"]]
+	return e.uname(u)
+
+
+## etichetta che rimpicciolisce il carattere finché il testo sta nella larghezza
+static func fit_label(t: String, w: float, size: int, col: Color, font: Font, min_size := 14) -> Label:
+	var sz := size
+	while sz > min_size and font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x > w:
+		sz -= 1
+	var l := UI.label(t, sz, col, font)
+	l.custom_minimum_size.x = w
+	l.clip_text = true
+	return l
+
+
+static func _chips(u: Dictionary) -> Array:
+	var chips := []
+	if u["st"] == "dead":
+		chips.append(["DISTRUTTO", UI.RED])
+	elif u["st"] != "on":
+		chips.append([{"prep": "PRONTO AL LANCIO", "dock": "NELL'HANGAR", "jumped": "SALTATO", "landed": "ATTERRATO", "orbit": "IN ORBITA", "off": "FUORI MAPPA", "spent": "SENZA ENERGIA"}.get(u["st"], str(u["st"]).to_upper()), UI.CYAN])
+	if u.get("ffon", false):
+		chips.append(["CAMPO DI FORZA", UI.CYAN])
+	if int(u.get("jump", 0)) == 1:
+		chips.append(["SALTO PREPARATO", UI.YELLOW])
+	elif int(u.get("jump", 0)) == 2:
+		chips.append(["SALTO AVVIATO", UI.YELLOW])
+	if not u.get("alerted", true):
+		chips.append(["NON ALLERTATO", UI.MUTED])
+	return chips
+
+
+static func _chip(t: String, col: Color) -> Control:
+	var p := PanelContainer.new()
+	var cs := UI.panel_style(Color(0, 0, 0, 0.75), col, 2, 3)
+	cs.content_margin_top = 1
+	cs.content_margin_bottom = 1
+	cs.content_margin_left = 6
+	cs.content_margin_right = 6
+	p.add_theme_stylebox_override("panel", cs)
+	p.add_child(UI.label(t, 13, col, UI.font_bold))
+	return p
+
+
+## intestazione sempre visibile: immagine intera in un riquadro della sua misura, pedina, stati,
+## nome (che si adatta alla larghezza), lato e posizione, energia
+static func header(e: DVEngine, u: Dictionary, hidden: bool, full: bool, w: float) -> Control:
+	UI.init_fonts()
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 4)
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 10)
+	vb.add_child(top)
+	var side_w := 140.0
+	var art: Texture2D = null
+	if not hidden:
+		art = missile_img(u["cls"]) if u["kind"] == "mis" else ship_img(u["cls"])
+	var ih := 112.0
+	var iw := w - side_w - 10
+	if art != null:
+		var asp := float(art.get_width()) / maxf(1.0, art.get_height())
+		iw = minf(iw, ih * asp)
+		ih = iw / asp
+	var fr := PanelContainer.new()
+	var fs := UI.panel_style(Color("#07070b"), UI.SIDE[u["side"]], 2, 4)
+	fs.set_content_margin_all(2)
+	fr.add_theme_stylebox_override("panel", fs)
+	fr.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(fr)
+	if art != null:
+		var tr := TextureRect.new()
+		tr.texture = art
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.custom_minimum_size = Vector2(iw, ih)
+		if u["st"] == "dead":
+			tr.modulate = Color(0.45, 0.3, 0.28)
+		fr.add_child(tr)
+	else:
+		var ph := Control.new()
+		ph.custom_minimum_size = Vector2(iw, ih)
+		fr.add_child(ph)
+	var sv := VBoxContainer.new()
+	sv.add_theme_constant_override("separation", 4)
+	sv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(sv)
+	sv.add_child(UI.icon_rect(UI.counter_tex(u["side"], u["kind"], u["cls"], u["label"], hidden or (u["kind"] == "ship" and u.get("ffon", false))), Vector2(52, 52)))
+	if not hidden:
+		for ch in _chips(u):
+			sv.add_child(_chip(ch[0], ch[1]))
+	vb.add_child(fit_label(full_name(e, u, hidden), w, 30, UI.SIDE[u["side"]], UI.font_title, 16))
+	var line := "%s · %s" % [D.SIDE_NAMES[u["side"]], e.sc["sides"][u["side"]]]
+	if u["st"] == "on":
+		line += "  ·  %s · ore %s · vel. %d" % [e.hcode(u["hex"]), D.DIR_NAMES[u["dir"]], u["v"]]
+	vb.add_child(fit_label(line, w, 16, UI.TEXT, UI.font_semi, 12))
+	if full and not hidden and u["kind"] in ["ship", "bc"]:
+		var tot: int
+		var left: int
+		var txt: String
+		if u["kind"] == "ship":
+			tot = int(u["cap"]) / e.burn(u)
+			left = e.energy(u) / e.burn(u)
+			txt = "%d/%d blocchi da %d" % [left, tot, e.burn(u)]
+		else:
+			tot = 15
+			left = int(u["eu"])
+			txt = "%d/15 unità" % left
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 8)
+		h.add_child(UI.label("ENERGIA", 14, UI.YELLOW, UI.font_bold))
+		var bar := BlockBar.new()
+		bar.total = tot
+		bar.left = left
+		bar.custom_minimum_size = Vector2(0, 12)
+		bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(bar)
+		h.add_child(UI.label(txt, 14, UI.TEXT, UI.font_semi))
+		vb.add_child(h)
+	return vb
+
+
+## scheda Caratteristiche: valori, scafo, missili pronti (o la descrizione del missile)
+static func stats(e: DVEngine, u: Dictionary, hidden: bool, full: bool, w: float) -> Control:
+	UI.init_fonts()
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 8)
+	if hidden:
+		body.add_child(UI.wrap(UI.label("Pedina coperta: non ancora individuata. Si scopre entro 3 esagoni da una vostra astronave all'inizio della vostra fase di comando, o con la ricerca attiva.", 16, UI.MUTED, UI.font_body), w))
+		return body
+	match u["kind"]:
+		"ship":
+			var sd: Dictionary = e.sdef(u)
+			var ffc := "—" if int(sd["ff"]) == 0 else str(sd["ff"])
+			body.add_child(_tiles([
+				[u["pods"].size(), "moduli"], ["±%d" % sd["vr"], "variazione"], [e.mr(u), "manovra", UI.YELLOW if e.mr(u) == int(sd["mr"]) else UI.RED],
+				[sd["burst"], "burster"], [sd["armor"], "corazza"],
+				[ffc, "campo forza", UI.CYAN if u.get("ffon", false) else UI.YELLOW], [sd["civ"], "civiltà"], [sd["tp"], "puntamento"],
+				["sì" if sd["stream"] else "no", "aerodin."], [e.bc_count(u), "com. batt."]], w))
+			body.add_child(_section("Scafo"))
+			var hull := HBoxContainer.new()
+			hull.add_theme_constant_override("separation", 6)
+			var parts := [["bridge", "Ponte"], ["engine", "Motore"]]
+			if int(sd["ff"]) > 0:
+				parts.append(["ff", "Campo di forza"])
+			var pw := (w - 6 * (parts.size() - 1)) / parts.size()
+			for p in parts:
+				hull.add_child(_part_tile(p[1], e.part_state(u, p[0]), int(sd["armor"]), pw))
+			body.add_child(hull)
+			var prep := e.prepared_of(u)
+			if not prep.is_empty():
+				body.add_child(_section("Pronti sopra la nave"))
+				var hb := HFlowContainer.new()
+				hb.add_theme_constant_override("h_separation", 6)
+				hb.add_theme_constant_override("v_separation", 6)
+				for m in prep:
+					var mp := PanelContainer.new()
+					mp.add_theme_stylebox_override("panel", UI.panel_style(Color("#131c36"), Color("#2b3654"), 1, 4))
+					var mv := VBoxContainer.new()
+					mp.add_child(mv)
+					mv.add_child(UI.icon_rect(missile_img(m["cls"]) if full else UI.counter_tex(m["side"], "mis", m["cls"], m["label"], true), Vector2(120, 24) if full else Vector2(40, 40)))
+					mv.add_child(UI.label(("%s (mod. %d)" % [D.MNAME[m["cls"]], int(m["pod"]) + 1]) if full else "coperta", 13, UI.TEXT, UI.font_semi))
+					hb.add_child(mp)
+				body.add_child(hb)
+			body.add_child(UI.wrap(UI.label("Valori in giallo: originali; in rosso: ridotti dai danni. Gli stati delle parti: V vulnerabile, D danneggiato, X distrutto.", 14, UI.MUTED, UI.font_body), w))
+		"bc":
+			var sd: Dictionary = e.sdef(u)
+			body.add_child(_tiles([["±%d" % sd["vr"], "variazione"], [e.mr(u), "manovra"], [sd["burst"], "burster"],
+				[sd["armor"], "corazza"], [sd["tp"], "puntamento"]], w))
+			body.add_child(_section("Scafo"))
+			var hull := HBoxContainer.new()
+			hull.add_theme_constant_override("separation", 6)
+			for p in [["bridge", "Ponte"], ["engine", "Motore"]]:
+				hull.add_child(_part_tile(p[1], e.part_state(u, p[0]), int(sd["armor"]), (w - 6) / 2))
+			body.add_child(hull)
+			var host: Dictionary = e.units.get(u.get("host", ""), {})
+			if not host.is_empty():
+				body.add_child(UI.label("Nave madre: %s" % e.uname(host), 16, UI.MUTED, UI.font_semi))
+		"mis":
+			_missile(e, u, body, w)
+	return body
+
+
+## scheda Moduli: i moduli con l'immagine intera in riquadri della stessa misura; un clic mostra il dettaglio
+static func pods(e: DVEngine, u: Dictionary, full: bool, w: float, detail := -1, on_pick := Callable()) -> Control:
+	UI.init_fonts()
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 8)
+	var n: int = u["pods"].size()
+	if detail >= 0 and detail < n:
+		var p: Dictionary = u["pods"][detail]
+		var st := e.pod_state(u, detail)
+		var tex := UI.tex(D.pod_img(p["t"]))
+		var asp := float(tex.get_width()) / maxf(1.0, tex.get_height())
+		var fr := PanelContainer.new()
+		var fs := UI.panel_style(Color("#07070b"), ST_COL[st], 2, 4)
+		fs.set_content_margin_all(2)
+		fr.add_theme_stylebox_override("panel", fs)
+		var tr := TextureRect.new()
+		tr.texture = tex
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.custom_minimum_size = Vector2(w - 8, (w - 8) / asp)
+		fr.add_child(tr)
+		body.add_child(fr)
+		var hr := HBoxContainer.new()
+		hr.add_theme_constant_override("separation", 8)
+		hr.add_child(_badge(st))
+		hr.add_child(UI.label("Modulo %d · %s" % [detail + 1, D.PODS[p["t"]]["name"]], 22, UI.YELLOW, UI.font_bold))
+		body.add_child(hr)
+		body.add_child(UI.label(_pod_info(e, u, detail, full), 16, UI.CYAN, UI.font_semi))
+		body.add_child(UI.wrap(UI.label(D.POD_TEXT.get(p["t"], ""), 17, UI.TEXT, UI.font_body), w))
+		var back := UI.button("Torna ai moduli", 0, 40, 17)
+		back.pressed.connect(func(): on_pick.call(-1))
+		body.add_child(back)
+		return body
+	var cols := 2 if n <= 4 else 3
+	var g := GridContainer.new()
+	g.columns = cols
+	g.add_theme_constant_override("h_separation", 6)
+	g.add_theme_constant_override("v_separation", 6)
+	body.add_child(g)
+	var tw := (w - 6 * (cols - 1)) / cols
+	for i in n:
+		g.add_child(_pod_card(e, u, i, full, tw, on_pick))
+	body.add_child(UI.wrap(UI.label("Tocca un modulo per leggerne la descrizione. NG non guidati, G guidati, I intelligenti, M MIMS; * = da preparare prima del lancio.", 14, UI.MUTED, UI.font_body), w))
+	return body
+
+
+static func _pod_info(e: DVEngine, u: Dictionary, i: int, full: bool) -> String:
+	var p: Dictionary = u["pods"][i]
+	var pd: Dictionary = D.PODS[p["t"]]
+	var st := e.pod_state(u, i)
+	var info := "cor. %d · %s" % [p["armor"], ST_WORD[st]]
+	if pd["lp"] and full:
+		var bits := []
+		for mt in D.MTYPES:
+			var k := int(p["ms"].get(mt, 0))
+			if k > 0:
+				bits.append("%s %d%s" % [{"ug": "NG", "g": "G", "i": "I", "m": "M"}[mt], k, "*" if mt in pd["prep"] else ""])
+		if not bits.is_empty():
+			info = " ".join(bits)
+	if p["t"] == "bcpod" and p["bc"] != "":
+		var b: Dictionary = e.units[p["bc"]]
+		info = "%s: %s" % [b["label"], {"dock": "a bordo", "prep": "pronto", "on": "in volo", "dead": "perso"}.get(b["st"], b["st"])]
+	if p["t"] == "tractor":
+		info = "civiltà %d · cor. %d" % [p["civ"], p["armor"]]
+	return info
+
+
+static func _pod_card(e: DVEngine, u: Dictionary, i: int, full: bool, w: float, on_pick: Callable) -> Control:
+	var p: Dictionary = u["pods"][i]
+	var pd: Dictionary = D.PODS[p["t"]]
+	var st := e.pod_state(u, i)
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(w, 0)
+	b.focus_mode = Control.FOCUS_NONE
+	var s := UI.panel_style(Color("#131c36"), ST_COL[st], 2, 4)
+	var sh := UI.panel_style(Color("#1b2748"), UI.YELLOW if st == 0 else ST_COL[st], 2, 4)
+	for k in ["normal", "focus", "disabled"]:
+		b.add_theme_stylebox_override(k, s)
+	b.add_theme_stylebox_override("hover", sh)
+	b.add_theme_stylebox_override("pressed", sh)
+	if on_pick.is_valid():
+		b.pressed.connect(func(): on_pick.call(i))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 1)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.position = Vector2(3, 3)
+	b.add_child(v)
+	var ih := (w - 6) / 2.6
+	var img := Control.new()
+	img.custom_minimum_size = Vector2(w - 6, ih)
+	img.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var tr := TextureRect.new()
+	tr.texture = UI.tex(D.pod_img(p["t"]))
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.size = Vector2(w - 6, ih)
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if st == 3:
+		tr.modulate = Color(0.4, 0.3, 0.3)
+	elif st == 2:
+		tr.modulate = Color(0.95, 0.75, 0.65)
+	img.add_child(tr)
+	var bd := _badge(st)
+	bd.custom_minimum_size = Vector2(22, 22)
+	bd.position = Vector2(2, 2)
+	bd.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	img.add_child(bd)
+	var num := UI.label(str(i + 1), 15, UI.TEXT, UI.font_bold)
+	num.position = Vector2(w - 22, 0)
+	num.add_theme_color_override("font_shadow_color", Color.BLACK)
+	num.add_theme_constant_override("shadow_offset_x", 2)
+	num.add_theme_constant_override("shadow_offset_y", 2)
+	img.add_child(num)
+	if st == 3:
+		var cx := Cross.new()
+		cx.size = Vector2(w - 6, ih)
+		cx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		img.add_child(cx)
+	v.add_child(img)
+	var nl := fit_label(pd["name"], w - 10, 15, UI.TEXT if st < 3 else UI.RED, UI.font_bold, 11)
+	nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(nl)
+	var il := fit_label(_pod_info(e, u, i, full), w - 10, 13, UI.CYAN, UI.font_semi, 10)
+	il.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(il)
+	b.custom_minimum_size.y = ih + 44
+	return b
+
+
 ## scheda completa. full = si vedono energia e missili (proprie unità o partita finita)
 static func build(e: DVEngine, u: Dictionary, hidden: bool, full: bool, w: float) -> Control:
 	UI.init_fonts()
@@ -144,16 +466,16 @@ static func _banner(e: DVEngine, u: Dictionary, art: Texture2D, hidden: bool, w:
 static func _tile(val: String, cap: String, col := UI.YELLOW, wt := 84.0) -> Control:
 	var p := PanelContainer.new()
 	var s := UI.panel_style(Color("#131c36"), Color("#2b3654"), 1, 4)
-	s.set_content_margin_all(4)
+	s.set_content_margin_all(2)
 	p.add_theme_stylebox_override("panel", s)
 	p.custom_minimum_size = Vector2(wt, 0)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", -4)
+	v.add_theme_constant_override("separation", -5)
 	p.add_child(v)
-	var a := UI.label(val, 24, col, UI.font_bold)
+	var a := UI.label(val, 19, col, UI.font_bold)
 	a.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(a)
-	var b := UI.label(cap.to_upper(), 12, UI.MUTED, UI.font_semi)
+	var b := UI.label(cap.to_upper(), 10, UI.MUTED, UI.font_semi)
 	b.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(b)
 	return p
