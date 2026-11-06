@@ -1640,7 +1640,7 @@ func _stats_box(vb: VBoxContainer) -> void:
 	vb.add_child(head)
 	for s in 2:
 		var l := UI.label(engine.pname(s), 24, UI.SIDE[s], UI.font_bold)
-		l.custom_minimum_size.x = 358
+		l.custom_minimum_size.x = 348
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if s == 0 else HORIZONTAL_ALIGNMENT_LEFT
 		l.clip_text = true
 		head.add_child(l)
@@ -1670,15 +1670,15 @@ func _stats_box(vb: VBoxContainer) -> void:
 			if k == "hits" and int(st[s]["fires"]) > 0:
 				txt = "%d (%d%%)" % [v, roundi(100.0 * v / int(st[s]["fires"]))]
 			var vl := UI.label(txt, 19, UI.TEXT, UI.font_mono)
-			vl.custom_minimum_size.x = 120
+			vl.custom_minimum_size.x = 140
 			vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if s == 0 else HORIZONTAL_ALIGNMENT_LEFT
 			var bar := Control.new()
-			bar.custom_minimum_size = Vector2(230, 26)
+			bar.custom_minimum_size = Vector2(200, 26)
 			var fill := ColorRect.new()
 			fill.color = Color(UI.SIDE[s], 0.85)
-			var wpx := 230.0 * v / mx
+			var wpx := 200.0 * v / mx
 			fill.size = Vector2(wpx, 16)
-			fill.position = Vector2(230.0 - wpx if s == 0 else 0.0, 5)
+			fill.position = Vector2(200.0 - wpx if s == 0 else 0.0, 5)
 			bar.add_child(fill)
 			if s == 0:
 				r.add_child(vl)

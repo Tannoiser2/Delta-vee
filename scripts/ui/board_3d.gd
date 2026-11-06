@@ -449,66 +449,187 @@ func _box(x: float, y: float, z: float) -> BoxMesh:
 	return b
 
 
-## modellino d'epoca: scafo bianco, muso rosso come sulla copertina, strisce del colore del lato.
-## La prua punta verso +x.
-func _model(kind: String, cls: String, side: int) -> Node3D:
-	var n := Node3D.new()
-	var hull := _mat(Color(0.88, 0.9, 0.95), 0.25, 0.35)
-	var stripe := _mat(UI.SIDE[side], 0.1, 0.5)
-	var nose := _mat(Color(0.75, 0.12, 0.1), 0.2, 0.4)
-	var glass := _mat(Color(0.3, 0.85, 0.75), 0.0, 0.1)
-	glass.emission_enabled = true
-	glass.emission = Color(0.1, 0.5, 0.4)
-	var flame := StandardMaterial3D.new()
-	flame.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	flame.albedo_color = Color(1.0, 0.75, 0.9)
-	flame.emission_enabled = true
-	flame.emission = Color(1.0, 0.5, 0.8)
+# ---------------------------------------------------------------- modelli 3D (Meshy)
+
+## modelli: file, rotazione per portare la prua a +x, ugelli dei motori [z, y, raggio] nel modello
+## ruotato (misurati dalla vista di poppa)
+const MODELS := {
+	"TX": {"rot": 180.0, "noz": [[0.0, 0.05, 0.05], [-0.3, 0.0, 0.06], [0.3, -0.02, 0.06]]},
+	"Piccolo": {"rot": 90.0, "noz": [[0.0, 0.005, 0.08], [-0.18, 0.0, 0.05], [0.18, 0.0, 0.05]]},
+	"Dagger": {"rot": 180.0, "noz": [[0.0, 0.07, 0.05], [-0.1, -0.03, 0.03], [0.1, -0.03, 0.03]]},
+	"Gamma": {"rot": 180.0, "noz": [[-0.08, 0.2, 0.06], [0.1, 0.2, 0.06], [-0.05, -0.08, 0.05], [0.07, -0.08, 0.05]]},
+	"Flute": {"rot": 180.0, "noz": [[-0.12, 0.1, 0.06], [0.12, 0.1, 0.06], [-0.12, -0.08, 0.05], [0.12, -0.08, 0.05]]},
+	"Sword": {"rot": 180.0, "noz": [[0.0, 0.03, 0.05], [-0.4, -0.1, 0.05], [0.4, -0.1, 0.05]]},
+	"Zeta": {"rot": 180.0, "noz": [[0.0, 0.0, 0.1]]},
+	"Clarinet": {"rot": 180.0, "noz": [[-0.03, 0.03, 0.03], [0.03, 0.03, 0.03], [-0.03, -0.03, 0.03], [0.03, -0.03, 0.03]]},
+	"Spear": {"rot": 180.0, "noz": [[0.0, 0.0, 0.04], [-0.42, 0.0, 0.05], [0.42, 0.0, 0.05]]},
+	"Iota": {"rot": 180.0, "noz": [[0.0, -0.02, 0.08], [-0.04, -0.2, 0.04], [0.04, -0.2, 0.04]]},
+	"Mu": {"rot": 180.0, "noz": [[-0.05, 0.05, 0.045], [0.05, 0.05, 0.045], [-0.05, -0.12, 0.045], [0.05, -0.12, 0.045]]},
+	"missile": {"rot": 180.0, "noz": [[0.0, 0.0, 0.06]]},
+}
+
+static var _scenes := {}
+static var _sh_hull: Shader
+static var _sh_flame: Shader
+
+const HULL_SHADER := """
+shader_type spatial;
+uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic;
+uniform vec3 accent : source_color = vec3(1.0, 0.0, 0.0);
+uniform float accent_on = 0.0;
+uniform vec3 hull_tint : source_color = vec3(1.0);
+void fragment() {
+	vec3 c = texture(albedo_tex, UV).rgb;
+	float mx = max(c.r, max(c.g, c.b));
+	float mn = min(c.r, min(c.g, c.b));
+	float sat = (mx - mn) / (mx + 0.0001);
+	// strisce rosse -> colore del lato
+	float red = clamp((c.r - max(c.g, c.b)) * 4.0 - 0.1, 0.0, 1.0) * smoothstep(0.2, 0.38, sat) * accent_on;
+	c = mix(c, accent * (mx * 1.05), red);
+	// scafo chiaro e poco saturo -> tinta del lato
+	float hull = (1.0 - smoothstep(0.08, 0.3, sat)) * smoothstep(0.3, 0.75, mx);
+	c = mix(c, c * hull_tint, hull);
+	ALBEDO = c;
+	ROUGHNESS = 0.5;
+	METALLIC = 0.3;
+	SPECULAR = 0.5;
+}
+"""
+
+const FLAME_SHADER := """
+shader_type spatial;
+render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled;
+uniform vec3 core : source_color = vec3(1.0, 0.97, 0.9);
+uniform vec3 outer : source_color = vec3(0.35, 0.6, 1.0);
+uniform float power = 1.0;
+varying float k;
+void vertex() {
+	k = clamp(VERTEX.y + 0.5, 0.0, 1.0);
+}
+void fragment() {
+	float f = abs(dot(NORMAL, VIEW));
+	float flick = 0.85 + 0.15 * sin(TIME * 40.0 + k * 12.0);
+	vec3 col = mix(outer, core, pow(k, 2.5));
+	ALBEDO = col * pow(k, 1.6) * pow(f, 3.0) * power * flick;
+}
+"""
+
+
+static func model_key(kind: String, cls: String) -> String:
+	if kind == "mis":
+		return "missile"
+	if kind == "bc" or cls in ["T5000", "TX"]:
+		return "TX"
+	return cls if MODELS.has(cls) else "Piccolo"
+
+
+## lunghezza in esagoni (lato = 1): dalla più piccola (Terwillicker, 0 moduli) al Corco Mu (12)
+static func model_len(kind: String, cls: String) -> float:
 	match kind:
 		"mis":
-			var body := _part(n, _cyl(0.05, 0.42), _mat(Color(0.8, 0.8, 0.82)), Vector3.ZERO, Vector3(0, 0, 90))
-			_part(n, _cyl(0.05, 0.12, 0.0), stripe, Vector3(0.27, 0, 0), Vector3(0, 0, -90))
-			for k in 4:
-				_part(n, _box(0.1, 0.01, 0.16), stripe, Vector3(-0.17, 0, 0), Vector3(k * 45.0, 0, 0))
-			_part(n, SphereMesh.new(), flame, Vector3(-0.25, 0, 0), Vector3.ZERO, Vector3(0.08, 0.06, 0.06))
-			if cls == "m":
-				body.scale = Vector3(1.6, 1.0, 1.6)
+			return 0.5
 		"bc":
-			_part(n, _cyl(0.07, 0.5, 0.03), hull, Vector3.ZERO, Vector3(0, 0, -90))
-			_part(n, _box(0.22, 0.02, 0.5), stripe, Vector3(-0.08, 0, 0))
-			_part(n, SphereMesh.new(), glass, Vector3(0.05, 0.05, 0), Vector3.ZERO, Vector3(0.12, 0.07, 0.07))
-			_part(n, SphereMesh.new(), flame, Vector3(-0.27, 0, 0), Vector3.ZERO, Vector3(0.07, 0.05, 0.05))
-		_:
-			var npods: int = int(D.SHIPS.get(cls, {}).get("pods", 4))
-			var big: bool = npods >= 7
-			var L := 0.75 + npods * 0.035
-			var R := 0.11 + npods * 0.008
-			var civil: bool = cls in ["Gamma", "Zeta", "Iota", "Mu"]
-			# fusoliera
-			_part(n, _cyl(R, L * 0.75), hull, Vector3(-L * 0.05, 0, 0), Vector3(0, 0, 90))
-			_part(n, _cyl(R, L * 0.22, 0.0), nose, Vector3(L * 0.43, 0, 0), Vector3(0, 0, -90))
-			_part(n, _cyl(R * 1.02, 0.05), stripe, Vector3(L * 0.15, 0, 0), Vector3(0, 0, 90))
-			_part(n, _cyl(R * 1.02, 0.05), stripe, Vector3(-L * 0.25, 0, 0), Vector3(0, 0, 90))
-			_part(n, SphereMesh.new(), glass, Vector3(L * 0.22, R * 0.75, 0), Vector3.ZERO, Vector3(0.22, 0.1, 0.12) * (1.0 + npods * 0.03))
-			# moduli: gondole laterali
-			var side_pods := mini(npods, 6) if not civil else 0
-			for i in side_pods:
-				var zz := (0.32 + (i / 2) * 0.12) * (1 if i % 2 == 0 else -1)
-				var xx := -L * 0.12 - (i / 2) * 0.16
-				_part(n, _box(0.08, 0.03, absf(zz)), hull, Vector3(xx, 0, zz * 0.5))
-				_part(n, _cyl(0.07, L * 0.42), hull, Vector3(xx, 0, zz), Vector3(0, 0, 90))
-				_part(n, _cyl(0.072, 0.04), stripe, Vector3(xx + 0.06, 0, zz), Vector3(0, 0, 90))
-				_part(n, SphereMesh.new(), flame, Vector3(xx - L * 0.22, 0, zz), Vector3.ZERO, Vector3(0.09, 0.07, 0.07))
-			if civil:
-				# mercantili Corco: container in fila sotto lo scafo
-				for i in mini(npods, 12):
-					var row := i / 2
-					var zz := 0.2 * (1 if i % 2 == 0 else -1)
-					_part(n, _box(0.16, 0.14, 0.16), stripe if i % 3 == 0 else hull, Vector3(L * 0.15 - row * 0.18, -0.02, zz))
-			# motore principale
-			_part(n, _cyl(R * 0.7, 0.1, R * 0.5), _mat(Color(0.35, 0.35, 0.38)), Vector3(-L * 0.45, 0, 0), Vector3(0, 0, 90))
-			_part(n, SphereMesh.new(), flame, Vector3(-L * 0.53, 0, 0), Vector3.ZERO, Vector3(0.14, 0.1, 0.1) * (1.4 if big else 1.0))
+			return 0.45
+	return 0.65 + 0.1 * int(D.SHIPS.get(cls, {}).get("pods", 4))
+
+
+static func _aabb_of(n: Node, xf: Transform3D, acc: Array) -> void:
+	var t := xf
+	if n is Node3D:
+		t = xf * (n as Node3D).transform
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh != null:
+		var b: AABB = t * (n as MeshInstance3D).mesh.get_aabb()
+		acc[0] = b if acc[0] == null else (acc[0] as AABB).merge(b)
+	for c in n.get_children():
+		_aabb_of(c, t, acc)
+
+
+func _recolor(n: Node, side: int) -> void:
+	if n is MeshInstance3D:
+		var mi := n as MeshInstance3D
+		for i in mi.mesh.get_surface_count():
+			var src := mi.mesh.surface_get_material(i)
+			var tex: Texture2D = null
+			if src is BaseMaterial3D:
+				tex = (src as BaseMaterial3D).albedo_texture
+			var m := ShaderMaterial.new()
+			m.shader = _sh_hull
+			m.set_shader_parameter("albedo_tex", tex)
+			if side == 1:
+				# l'altra squadra: strisce verdi e scafo grigio-verde
+				m.set_shader_parameter("accent", UI.SIDE[1])
+				m.set_shader_parameter("accent_on", 1.0)
+				m.set_shader_parameter("hull_tint", Color(0.74, 0.86, 0.72))
+			mi.set_surface_override_material(i, m)
+	for c in n.get_children():
+		_recolor(c, side)
+
+
+## modellino 3D: prua verso +x, lunghezza secondo la stazza; i getti dei motori in meta "flames"
+func _model(kind: String, cls: String, side: int) -> Node3D:
+	if _sh_hull == null:
+		_sh_hull = Shader.new()
+		_sh_hull.code = HULL_SHADER
+		_sh_flame = Shader.new()
+		_sh_flame.code = FLAME_SHADER
+	var key := model_key(kind, cls)
+	if not _scenes.has(key):
+		_scenes[key] = load("res://assets/models/%s.glb" % key)
+	var def: Dictionary = MODELS[key]
+	var n := Node3D.new()
+	var body := Node3D.new()
+	n.add_child(body)
+	var inst: Node3D = (_scenes[key] as PackedScene).instantiate()
+	inst.rotation_degrees.y = def["rot"]
+	body.add_child(inst)
+	var acc := [null]
+	_aabb_of(inst, Transform3D.IDENTITY, acc)
+	var bb: AABB = acc[0]
+	var sc := model_len(kind, cls) / maxf(0.001, bb.size.x)
+	var ctr := bb.get_center()
+	body.scale = Vector3.ONE * sc
+	body.position = -ctr * sc
+	_recolor(inst, side)
+	# getti: un cono additivo dietro ogni ugello
+	var flames := []
+	for nz in def["noz"]:
+		var fl := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = float(nz[2]) * sc
+		cm.bottom_radius = 0.0
+		cm.height = 1.0
+		cm.radial_segments = 14
+		cm.rings = 1
+		cm.cap_top = false
+		cm.cap_bottom = false
+		fl.mesh = cm
+		var fm := ShaderMaterial.new()
+		fm.shader = _sh_flame
+		if kind == "mis":
+			fm.set_shader_parameter("outer", Color(1.0, 0.45, 0.12))
+		fl.material_override = fm
+		fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		fl.rotation_degrees.z = -90.0
+		var base := Vector3(bb.position.x, float(nz[1]), float(nz[0]))
+		var pos := (base - ctr) * sc
+		n.add_child(fl)
+		flames.append({"node": fl, "x": pos.x, "pos": pos, "r": float(nz[2]) * sc})
+	n.set_meta("flames", flames)
 	return n
+
+
+## lunghezza dei getti: cresce con la velocità e con la potenza dei motori (manovra della nave)
+func _set_flames(m: Node3D, kind: String, cls: String, v: int, on: bool) -> void:
+	var mr := 9.0 if kind != "ship" else float(D.SHIPS.get(cls, {}).get("mr", 6))
+	var ln := clampf((0.12 + 0.06 * v) * (0.6 + 0.06 * mr), 0.08, 1.1) if on else 0.0
+	if kind == "mis":
+		ln = clampf(0.1 + 0.025 * v, 0.1, 0.45)
+	for f in m.get_meta("flames", []):
+		var fl: MeshInstance3D = f["node"]
+		fl.visible = ln > 0.0
+		var w := 1.0 + 0.03 * v
+		fl.scale = Vector3(w, ln, w)
+		fl.position = f["pos"] - Vector3(ln * 0.5, 0, 0)
 
 
 func _sync_units() -> void:
@@ -559,6 +680,10 @@ func _sync_units() -> void:
 		node.visible = al > 0.05
 		if e.has("model") and e["model"] != null:
 			e["model"].scale = Vector3.ONE * clampf(al, 0.05, 1.0) * float(e["model"].get_meta("base", 1.0))
+			var eng_on := true
+			if eng != null and eng.units.has(id) and r["kind"] != "mis":
+				eng_on = eng.part_state(eng.units[id], "engine") < 3 and eng.units[id]["st"] != "dead"
+			_set_flames(e["model"], r["kind"], r["cls"], int(u["v"]), eng_on)
 			e["model"].position.y = 0.55 + lift * 0.5 + sin(Time.get_ticks_msec() * 0.002 + p.x) * 0.03
 		if e.has("vel"):
 			e["vel"].text = str(u["v"])
@@ -599,7 +724,7 @@ func _make_unit(id: String, r: Dictionary, hidden: bool, ffon: bool, prepared: b
 	if not hidden:
 		var m := _model(kind, r["cls"], side)
 		m.position.y = 0.55
-		m.set_meta("base", 1.5 if kind == "ship" else 1.35)
+		m.set_meta("base", 1.0)
 		node.add_child(m)
 		out["model"] = m
 		# asta trasparente fra gettone e modellino

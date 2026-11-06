@@ -33,9 +33,15 @@ repository è pubblico).
   nemico fa solo il suo prossimo movimento, già noto); ogni nave evita gli esagoni che i missili nemici
   possono raggiungere. **Suggerisci** propone gli ordini o il colpo dell'IA, che si possono modificare.
 - **Mappa 2D** come il tabellone (sigle degli esagoni, logo e rosa delle direzioni) e **tabellone 3D**
-  girevole con le pedine come gettoni e sopra i modellini d'epoca (scafo bianco, muso rosso e strisce del
-  colore del lato, come sulla copertina), missili, pianeti e asteroidi. Si passa dall'una all'altro con
-  **2D / 3D**.
+  girevole con le pedine come gettoni e sopra i modelli 3D delle astronavi (fatti con Meshy, in
+  `assets/models/`), missili, pianeti e asteroidi. Si passa dall'una all'altro con **2D / 3D**.
+  - Le navi rispettano la stazza: dal Terwillicker (0 moduli, quasi un caccia; lo stesso modello serve per
+    il 5000, per l'X e per i caccia) al Corco Mu (12 moduli). Il missile ha un modello unico.
+  - Dietro gli ugelli c'è il getto dei motori, più lungo con la velocità e con la potenza (manovra) della
+    nave; si spegne se il motore è distrutto. I missili hanno un getto arancione.
+  - Il secondo lato ha lo scafo grigio-verde e le strisce verdi al posto di quelle rosse.
+  - `tools/ottimizza_modelli.sh` rifà i modelli leggeri dagli originali (da 24-83 MB a circa 1 MB l'uno);
+    `tests/galleria3d_shot.gd` e `tests/navi3d_shot.gd` li fotografano.
 - **Scheda dell'unità** come lo Spaceship Log: compartimenti con V/D/X, energia, missili per modulo,
   caccia, comandi di battaglia.
 - **Replay finale** continuo e simultaneo: in ogni turno tutte le unità dei due lati si muovono insieme,
