@@ -14,6 +14,7 @@ var menu_state := {}
 
 const CFG := "user://deltavee.cfg"
 var audio_on := true
+var grid_alpha := 1.0            # opacità della griglia di esagoni (0 = solo i puntini al centro)
 var _players: Array = []
 var _streams := {}
 
@@ -22,6 +23,7 @@ func _audio_init() -> void:
 	var c := ConfigFile.new()
 	if c.load(CFG) == OK:
 		audio_on = bool(c.get_value("audio", "on", true))
+		grid_alpha = clampf(float(c.get_value("vista", "griglia", 1.0)), 0.0, 1.0)
 	for i in 10:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
@@ -33,6 +35,14 @@ func set_audio(on: bool) -> void:
 	var c := ConfigFile.new()
 	c.load(CFG)
 	c.set_value("audio", "on", on)
+	c.save(CFG)
+
+
+func set_grid_alpha(a: float) -> void:
+	grid_alpha = clampf(a, 0.0, 1.0)
+	var c := ConfigFile.new()
+	c.load(CFG)
+	c.set_value("vista", "griglia", grid_alpha)
 	c.save(CFG)
 
 

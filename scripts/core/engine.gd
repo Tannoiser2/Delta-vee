@@ -68,6 +68,14 @@ var _atk := -1                   # lato che sta infliggendo il colpo in corso (-
 var _atk_u := ""                 # unità a cui va il merito del colpo in corso
 ## salvataggio: decisioni prese finora (var_to_str) e decisioni da rigiocare per riprendere una partita
 var dec_log: Array = []
+## stallo: turni di fila senza colpi a segno con le flotte lontane e che non si avvicinano
+var calm := 0                    # turni di fila senza colpi a segno
+var apart := 0                   # di questi, quanti con le flotte lontane che non si avvicinano
+var _calm_hits := -1
+var _calm_dist := -1
+const CALM_TURNS := 6
+const CALM_DIST := 10
+const CALM_MAX := 10
 var backlog: Array = []
 var resuming := false
 signal decided
@@ -1941,6 +1949,35 @@ func _end_turn_checks() -> void:
 		if far:
 			_win(-1, "tutte le unità avversarie sono a più di 25 esagoni di distanza.")
 			return
+	# stallo: le flotte si sono separate e nessuno colpisce più (navi alla deriva senza energia, rotte opposte)
+	var md := 9999
+	for a in live_units(0):
+		if a["kind"] == "mis":
+			continue
+		for b in live_units(1):
+			if b["kind"] == "mis":
+				continue
+			md = mini(md, Hex.dist(a["hex"], b["hex"]))
+	var hits: int = int(stats[0]["hits"]) + int(stats[1]["hits"]) + int(stats[0]["mhits"]) + int(stats[1]["mhits"]) + int(vp[0]) + int(vp[1])
+	if hits == _calm_hits:
+		calm += 1
+		apart = apart + 1 if md > CALM_DIST and md >= _calm_dist else 0
+	else:
+		calm = 0
+		apart = 0
+	_calm_hits = hits
+	_calm_dist = md
+	if apart >= CALM_TURNS or calm >= CALM_MAX:
+		var w0 := -1
+		if scn == 4 and vp[0] != vp[1]:
+			w0 = 0 if vp[0] > vp[1] else 1
+		var why := "le flotte si sono separate: nessun colpo a segno da %d turni e più di %d esagoni fra le navi nemiche più vicine." % [CALM_TURNS, CALM_DIST]
+		if apart < CALM_TURNS:
+			why = "stallo: nessun colpo a segno da %d turni (navi alla deriva o fuori portata)." % CALM_MAX
+		if scn == 4:
+			why += " Punti %d a %d." % [vp[0], vp[1]]
+		_win(w0, why)
+		return
 	if turn >= max_turns:
 		var w := -1
 		if scn == 4 and vp[0] != vp[1]:

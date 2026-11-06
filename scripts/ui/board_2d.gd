@@ -16,6 +16,7 @@ var viewer: Array = [0, 1]       # lati di cui si vedono le pedine coperte
 var ov := {}                     # sovrapposizioni: vedi game_view
 var world: Node2D
 var grid: Node2D
+var grid_alpha := 1.0
 var layer: Node2D
 var zoom := 0.6
 var _drag := false
@@ -175,6 +176,12 @@ func _process(_d: float) -> void:
 
 # ================================================================ griglia
 
+func set_grid_alpha(a: float) -> void:
+	grid_alpha = clampf(a, 0.0, 1.0)
+	if grid != null:
+		grid.queue_redraw()
+
+
 class GridLayer extends Node2D:
 	var board
 
@@ -182,7 +189,9 @@ class GridLayer extends Node2D:
 		UI.init_fonts()
 		var S: float = board.S
 		var mp: Dictionary = board.maps()
-		var col := Color(UI.HEX, 0.85)
+		var ga: float = board.grid_alpha
+		var col := Color(UI.HEX, 0.85 * ga)
+		var dot := Color(UI.HEX, 0.9)
 		var fine: bool = board.zoom > 0.32
 		for key in mp:
 			var p: PackedStringArray = str(key).split(",")
@@ -207,10 +216,13 @@ class GridLayer extends Node2D:
 					var cc := Hex.center(h, S)
 					var pts := Hex.corners(cc, S)
 					pts.append(pts[0])
-					draw_polyline(pts, col, 2.0)
-					if fine:
+					if ga > 0.01:
+						draw_polyline(pts, col, 2.0)
+					# puntino al centro: resta anche senza griglia
+					draw_circle(cc, S * 0.06, dot)
+					if fine and ga > 0.01:
 						var txt := "%02d%02d" % [q - bx * 16 + 1, r - by * 18 + 1]
-						draw_string(UI.font_mono, cc + Vector2(-S * 0.42, -S * 0.5), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, int(S * 0.3), Color(UI.HEX, 0.9))
+						draw_string(UI.font_mono, cc + Vector2(-S * 0.42, -S * 0.5), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, int(S * 0.3), Color(UI.HEX, 0.9 * ga))
 		# pianeti e asteroidi
 		if board.eng != null:
 			var ast: Texture2D = UI.tex("res://assets/markers/asteroidi.png")

@@ -456,6 +456,11 @@ func _orbit_score(e: DVEngine, u: Dictionary, st: Array, planet: Vector2i) -> fl
 	var dist := Hex.dist(st[0], planet)
 	var want := clampi(dist / 3, 1, 4)
 	best -= absi(v - want) * 2.5
+	# rotta verso il pianeta: chi va nella direzione sbagliata deve virare subito, anche se all'inizio
+	# si allontana un po' (senza questo una nave lenta a virare resta alla deriva per sempre)
+	if dist > 2 and v > 0:
+		var off := absi(Hex.ddiff(d, Hex.dir_to(st[0], planet)))
+		best -= off * (2.0 + v * 0.8 + minf(dist, 30.0) * 0.15)
 	return best
 
 

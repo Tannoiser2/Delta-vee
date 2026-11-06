@@ -27,7 +27,10 @@ var _from := Vector2.ZERO
 var _moved := false
 var _maps_key := ""
 var _map_nodes := {}
-var _tile_tex: Texture2D
+var _tile_tex: Texture2D        # fondo: puntini al centro, logo e bussola
+var _grid_tex: Texture2D        # griglia e sigle degli esagoni, su fondo trasparente
+var grid_alpha := 1.0
+var _grid_mats: Array = []
 var _units := {}                 # id -> {node, token, model, vel, key}
 var _ov_mesh: MeshInstance3D
 var _fx_root: Node3D
@@ -88,7 +91,8 @@ func _ready() -> void:
 	root3.add_child(_ov_mesh)
 	_fx_root = Node3D.new()
 	root3.add_child(_fx_root)
-	_tile_tex = _make_tile()
+	_tile_tex = _make_tile(false)
+	_grid_tex = _make_tile(true)
 	_update_cam()
 
 
@@ -275,40 +279,56 @@ func _star_panorama() -> Texture2D:
 
 
 ## un blocco di mappa disegnato una volta in una texture periodica (le mappe sono tutte uguali)
-func _make_tile() -> Texture2D:
+func set_grid_alpha(a: float) -> void:
+	grid_alpha = clampf(a, 0.0, 1.0)
+	for m in _grid_mats:
+		(m as StandardMaterial3D).albedo_color = Color(1, 1, 1, grid_alpha)
+	for k in _map_nodes:
+		var g: Node3D = _map_nodes[k].get_meta("grid")
+		g.visible = grid_alpha > 0.01
+
+
+func _make_tile(lines: bool) -> Texture2D:
 	var tv := SubViewport.new()
 	var px := 1536
 	tv.size = Vector2i(px, int(px * BH / BW))
-	tv.transparent_bg = false
+	tv.transparent_bg = lines
 	tv.render_target_update_mode = SubViewport.UPDATE_ONCE
 	tv.disable_3d = true
 	vp.add_child(tv)
 	var n := TileDraw.new()
 	n.k = px / BW
+	n.lines = lines
 	tv.add_child(n)
 	return tv.get_texture()
 
 
 class TileDraw extends Node2D:
 	var k := 64.0
+	var lines := false
 
 	func _draw() -> void:
 		UI.init_fonts()
 		var w := 24.0 * k
 		var h := 31.17691 * k
-		draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.02, 0.025))
 		var o := Vector2(0.75, 0.866) * k
 		var col := Color(UI.HEX, 0.95)
+		if lines:
+			for q in range(-1, 17):
+				for r in range(-1, 19):
+					var hh := Vector2i(q, r)
+					var c := Hex.center(hh, k) + o
+					var pts := Hex.corners(c, k)
+					pts.append(pts[0])
+					draw_polyline(pts, col, 3.0)
+					var qq := posmod(q, 16)
+					var rr := posmod(r, 18)
+					draw_string(UI.font_mono, c + Vector2(-k * 0.42, -k * 0.48), "%02d%02d" % [qq + 1, rr + 1], HORIZONTAL_ALIGNMENT_LEFT, -1, int(k * 0.3), col)
+			return
+		draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.02, 0.025))
 		for q in range(-1, 17):
 			for r in range(-1, 19):
-				var hh := Vector2i(q, r)
-				var c := Hex.center(hh, k) + o
-				var pts := Hex.corners(c, k)
-				pts.append(pts[0])
-				draw_polyline(pts, col, 3.0)
-				var qq := posmod(q, 16)
-				var rr := posmod(r, 18)
-				draw_string(UI.font_mono, c + Vector2(-k * 0.42, -k * 0.48), "%02d%02d" % [qq + 1, rr + 1], HORIZONTAL_ALIGNMENT_LEFT, -1, int(k * 0.3), col)
+				draw_circle(Hex.center(Vector2i(q, r), k) + o, k * 0.07, col)
 		var cc := Hex.center(Vector2i(8, 8), k) + o
 		var logo := "DeltaVee"
 		var fs := int(k * 2.1)
@@ -324,6 +344,7 @@ func _build_maps() -> void:
 	for k in _map_nodes:
 		_map_nodes[k].queue_free()
 	_map_nodes = {}
+	_grid_mats = []
 	var mp := _maps()
 	for key in mp:
 		var p: PackedStringArray = str(key).split(",")
@@ -340,6 +361,21 @@ func _build_maps() -> void:
 		mi.material_override = m
 		mi.position = Vector3(bx * BW - 0.75 + BW / 2, -0.02, by * BH - 0.866 + BH / 2)
 		root3.add_child(mi)
+		# griglia su un piano trasparente appena sopra: la sua opacità si regola dal cursore
+		var gi := MeshInstance3D.new()
+		gi.mesh = pl
+		var gm := StandardMaterial3D.new()
+		gm.albedo_texture = _grid_tex
+		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		gm.albedo_color = Color(1, 1, 1, grid_alpha)
+		gm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		gi.material_override = gm
+		gi.position.y = 0.004
+		gi.visible = grid_alpha > 0.01
+		mi.add_child(gi)
+		mi.set_meta("grid", gi)
+		_grid_mats.append(gm)
 		var lb := Label3D.new()
 		lb.text = str(mp[key])
 		lb.font = UI.font_title
@@ -527,10 +563,11 @@ static func model_key(kind: String, cls: String) -> String:
 static func model_len(kind: String, cls: String) -> float:
 	match kind:
 		"mis":
-			return 0.5
+			return 0.8
 		"bc":
-			return 0.45
-	return 0.65 + 0.1 * int(D.SHIPS.get(cls, {}).get("pods", 4))
+			return 0.75
+	# Terwillicker 1 esagono abbondante, Corco Mu 3,5 (sporge di mezzo esagono per parte)
+	return 1.0 + 0.21 * int(D.SHIPS.get(cls, {}).get("pods", 4))
 
 
 static func _aabb_of(n: Node, xf: Transform3D, acc: Array) -> void:
@@ -621,9 +658,9 @@ func _model(kind: String, cls: String, side: int) -> Node3D:
 ## lunghezza dei getti: cresce con la velocità e con la potenza dei motori (manovra della nave)
 func _set_flames(m: Node3D, kind: String, cls: String, v: int, on: bool) -> void:
 	var mr := 9.0 if kind != "ship" else float(D.SHIPS.get(cls, {}).get("mr", 6))
-	var ln := clampf((0.12 + 0.06 * v) * (0.6 + 0.06 * mr), 0.08, 1.1) if on else 0.0
+	var ln := clampf((0.2 + 0.1 * v) * (0.6 + 0.06 * mr), 0.12, 1.8) if on else 0.0
 	if kind == "mis":
-		ln = clampf(0.1 + 0.025 * v, 0.1, 0.45)
+		ln = clampf(0.15 + 0.04 * v, 0.15, 0.7)
 	for f in m.get_meta("flames", []):
 		var fl: MeshInstance3D = f["node"]
 		fl.visible = ln > 0.0
@@ -670,7 +707,7 @@ func _sync_units() -> void:
 			seen[hk] = idx + 1
 		var lift := idx * 0.1
 		var p: Vector2 = u["p"]
-		var off := Vector2(idx, -idx) * 0.12 if stacks.get(hk, 1) > 1 else Vector2.ZERO
+		var off := Vector2(idx, -idx) * 0.18 if stacks.get(hk, 1) > 1 else Vector2.ZERO
 		if f & 8:
 			off = Vector2(-0.3, 0.3)
 			lift = 0.16
@@ -684,9 +721,15 @@ func _sync_units() -> void:
 			if eng != null and eng.units.has(id) and r["kind"] != "mis":
 				eng_on = eng.part_state(eng.units[id], "engine") < 3 and eng.units[id]["st"] != "dead"
 			_set_flames(e["model"], r["kind"], r["cls"], int(u["v"]), eng_on)
-			e["model"].position.y = 0.55 + lift * 0.5 + sin(Time.get_ticks_msec() * 0.002 + p.x) * 0.03
+			if e.has("stick"):
+				var top: float = e["hy"] + idx * 0.4
+				e["stick"].scale.y = top / e["hy"]
+				e["stick"].position.y = top * 0.5
+			e["model"].position.y = (0.95 if r["kind"] == "ship" else 0.75) + idx * 0.4 + sin(Time.get_ticks_msec() * 0.002 + p.x) * 0.03
 		if e.has("vel"):
 			e["vel"].text = str(u["v"])
+			if e.has("hy"):
+				e["vel"].position.y = e["hy"] + (0.55 if r["kind"] == "ship" else 0.35) + idx * 0.4
 		if e.has("ff"):
 			e["ff"].visible = (f & 2) != 0
 
@@ -696,46 +739,60 @@ func _make_unit(id: String, r: Dictionary, hidden: bool, ffon: bool, prepared: b
 	root3.add_child(node)
 	var kind: String = r["kind"]
 	var side: int = r["side"]
-	var sz := 0.92 if kind == "ship" else 0.74
+	# niente pedina: solo un cerchietto trasparente a livello dell'esagono, del colore del lato
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	var rr := 0.3 if kind == "ship" else 0.22
 	if prepared:
-		sz *= 0.5
-	# gettone: bordo nero e faccia con la pedina originale
-	var token := MeshInstance3D.new()
-	token.mesh = _box(sz, 0.08, sz)
-	token.material_override = _mat(Color(0.08, 0.08, 0.08), 0.0, 0.8)
-	token.position.y = 0.04
-	node.add_child(token)
-	var face := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(sz * 0.98, sz * 0.98)
-	face.mesh = pm
-	var fm := StandardMaterial3D.new()
-	fm.albedo_texture = UI.counter_tex(side, kind, r["cls"], r["label"], hidden or (kind == "ship" and ffon))
-	fm.roughness = 0.7
-	fm.uv1_scale = Vector3(1, -1, 1)
-	fm.uv1_offset = Vector3(0, 1, 0)
-	fm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	face.material_override = fm
-	face.position.y = 0.081
-	node.add_child(face)
+		rr *= 0.6
+	tm.inner_radius = rr * 0.8
+	tm.outer_radius = rr
+	tm.rings = 32
+	tm.ring_segments = 8
+	ring.mesh = tm
+	ring.scale = Vector3(1, 0.25, 1)
+	var rm := StandardMaterial3D.new()
+	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rm.albedo_color = Color(UI.SIDE[side], 0.55)
+	ring.material_override = rm
+	ring.position.y = 0.04
+	node.add_child(ring)
+	var disc := MeshInstance3D.new()
+	var dm := CylinderMesh.new()
+	dm.top_radius = rr * 0.8
+	dm.bottom_radius = rr * 0.8
+	dm.height = 0.01
+	dm.radial_segments = 32
+	disc.mesh = dm
+	var dmat := StandardMaterial3D.new()
+	dmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dmat.albedo_color = Color(0.8, 0.9, 1.0, 0.12)
+	disc.material_override = dmat
+	disc.position.y = 0.035
+	node.add_child(disc)
 	var out := {"node": node, "model": null}
 	if prepared:
 		return out
+	var hy := 0.95 if kind == "ship" else 0.75
 	if not hidden:
 		var m := _model(kind, r["cls"], side)
-		m.position.y = 0.55
+		m.position.y = hy
 		m.set_meta("base", 1.0)
 		node.add_child(m)
 		out["model"] = m
 		# asta trasparente fra gettone e modellino
 		var stick := MeshInstance3D.new()
-		stick.mesh = _cyl(0.012, 0.5)
+		stick.mesh = _cyl(0.012, hy)
 		var sm := StandardMaterial3D.new()
 		sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		sm.albedo_color = Color(0.8, 0.9, 1.0, 0.35)
 		stick.material_override = sm
-		stick.position.y = 0.33
+		stick.position.y = hy * 0.5
 		node.add_child(stick)
+		out["stick"] = stick
+		out["hy"] = hy
 	else:
 		var blip := MeshInstance3D.new()
 		var sp := SphereMesh.new()
@@ -759,7 +816,7 @@ func _make_unit(id: String, r: Dictionary, hidden: bool, ffon: bool, prepared: b
 	vel.outline_modulate = Color(0, 0, 0)
 	vel.modulate = Color(1, 1, 1)
 	vel.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	vel.position = Vector3(0, 0.95 if kind == "ship" else 0.7, 0)
+	vel.position = Vector3(0, hy + 0.55 if kind == "ship" else hy + 0.35, 0)
 	vel.no_depth_test = true
 	node.add_child(vel)
 	out["vel"] = vel
@@ -922,12 +979,12 @@ func _draw_fx() -> void:
 				_boom3(f["p"], t)
 			"spark":
 				var c: Vector2 = f["p"]
-				_flash(Vector3(c.x, 0.55, c.y), 0.2 + t * 0.5, UI.CYAN, (1.0 - t) * 0.6)
+				_flash(Vector3(c.x, 0.95, c.y), 0.2 + t * 0.5, UI.CYAN, (1.0 - t) * 0.6)
 			"text":
 				_text3(f["p"], str(f["txt"]), bool(f["bad"]), t)
 			"warp":
 				var c: Vector2 = f["p"]
-				_flash(Vector3(c.x, 0.55, c.y), 0.3 + t * 2.0, Color(0.7, 0.85, 1.0), (1.0 - t) * 0.7)
+				_flash(Vector3(c.x, 0.95, c.y), 0.3 + t * 2.0, Color(0.7, 0.85, 1.0), (1.0 - t) * 0.7)
 			"puff":
 				var c: Vector2 = f["p"]
 				_flash(Vector3(c.x, 0.5, c.y), 0.3 + t * 0.4, Color(1, 1, 1), (1.0 - t) * 0.4)
@@ -974,8 +1031,8 @@ func _light(p: Vector3, col: Color, e: float, r := 3.0) -> void:
 
 ## colpi diversi per tipo di fuoco (stessi tempi dell'effetto 2D)
 func _shot3(a2: Vector2, b2: Vector2, w: String, hit: bool, t: float) -> void:
-	var a := Vector3(a2.x, 0.6, a2.y)
-	var b := Vector3(b2.x, 0.6, b2.y)
+	var a := Vector3(a2.x, 0.95, a2.y)
+	var b := Vector3(b2.x, 0.95, b2.y)
 	var dir := (b - a)
 	if dir.length() < 0.01:
 		dir = Vector3(1, 0, 0)
@@ -1068,7 +1125,7 @@ func _shot3(a2: Vector2, b2: Vector2, w: String, hit: bool, t: float) -> void:
 
 
 func _boom3(c2: Vector2, t: float) -> void:
-	var c := Vector3(c2.x, 0.55, c2.y)
+	var c := Vector3(c2.x, 0.95, c2.y)
 	var r := RandomNumberGenerator.new()
 	r.seed = int(c2.x * 13 + c2.y * 7)
 	if t < 0.22:
@@ -1121,7 +1178,7 @@ func _text3(p: Vector2, txt: String, bad: bool, t: float, col := Color(0, 0, 0, 
 	lb.outline_modulate = Color(0, 0, 0, al * 0.9)
 	lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	lb.no_depth_test = true
-	lb.position = Vector3(p.x, 1.3 + 0.8 * t, p.y)
+	lb.position = Vector3(p.x, 1.9 + 0.8 * t, p.y)
 	root3.add_child(lb)
 	_fx_nodes.append(lb)
 

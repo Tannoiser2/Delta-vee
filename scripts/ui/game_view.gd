@@ -121,6 +121,9 @@ func _ready() -> void:
 		engine.resumed.connect(_on_resumed)
 	board2d.set_engine(engine)
 	board3d.set_engine(engine)
+	if main != null:
+		board2d.set_grid_alpha(main.grid_alpha)
+		board3d.set_grid_alpha(main.grid_alpha)
 	_apply_view()
 	_refresh()
 	_fit.call_deferred()
@@ -233,6 +236,25 @@ func _build() -> void:
 		main.set_audio(not main.audio_on)
 		ba.text = "Audio sì" if main.audio_on else "Audio no")
 	hb.add_child(ba)
+	# opacità della griglia di esagoni
+	var gv := VBoxContainer.new()
+	gv.add_theme_constant_override("separation", -2)
+	gv.alignment = BoxContainer.ALIGNMENT_CENTER
+	gv.add_child(UI.label("Griglia", 14, UI.MUTED, UI.font_semi))
+	var gs := HSlider.new()
+	gs.min_value = 0.0
+	gs.max_value = 1.0
+	gs.step = 0.05
+	gs.custom_minimum_size = Vector2(110, 20)
+	gs.value = main.grid_alpha if main != null else 1.0
+	gs.focus_mode = Control.FOCUS_NONE
+	gs.tooltip_text = "Opacità della griglia di esagoni: a zero restano solo i puntini al centro"
+	gs.value_changed.connect(func(v: float):
+		board2d.set_grid_alpha(v)
+		board3d.set_grid_alpha(v))
+	gs.drag_ended.connect(func(_c): main.set_grid_alpha(gs.value))
+	gv.add_child(gs)
+	hb.add_child(gv)
 	var bl := UI.button("Diario", 90, 46, 18)
 	bl.pressed.connect(_toggle_log)
 	hb.add_child(bl)

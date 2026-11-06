@@ -33,13 +33,18 @@ repository è pubblico).
   nemico fa solo il suo prossimo movimento, già noto); ogni nave evita gli esagoni che i missili nemici
   possono raggiungere. **Suggerisci** propone gli ordini o il colpo dell'IA, che si possono modificare.
 - **Mappa 2D** come il tabellone (sigle degli esagoni, logo e rosa delle direzioni) e **tabellone 3D**
-  girevole con le pedine come gettoni e sopra i modelli 3D delle astronavi (fatti con Meshy, in
+  girevole con i modelli 3D delle astronavi (fatti con Meshy, in
   `assets/models/`), missili, pianeti e asteroidi. Si passa dall'una all'altro con **2D / 3D**.
-  - Le navi rispettano la stazza: dal Terwillicker (0 moduli, quasi un caccia; lo stesso modello serve per
-    il 5000, per l'X e per i caccia) al Corco Mu (12 moduli). Il missile ha un modello unico.
+  - Le navi rispettano la stazza: dal Terwillicker (0 moduli, quasi un caccia, poco più di un esagono;
+    lo stesso modello serve per il 5000, per l'X e per i caccia) al Corco Mu (12 moduli, tre esagoni e mezzo).
+    Il missile ha un modello unico.
+  - Niente pedina sotto i modelli: un'asta trasparente scende fino a un cerchietto del colore del lato a
+    livello dell'esagono; le unità nello stesso esagono si impilano in altezza.
   - Dietro gli ugelli c'è il getto dei motori, più lungo con la velocità e con la potenza (manovra) della
     nave; si spegne se il motore è distrutto. I missili hanno un getto arancione.
   - Il secondo lato ha lo scafo grigio-verde e le strisce verdi al posto di quelle rosse.
+- **Opacità della griglia**: il cursore **Griglia** in alto regola la griglia di esagoni in 2D e in 3D; a zero
+  restano solo i puntini al centro degli esagoni. La scelta resta salvata.
   - `tools/ottimizza_modelli.sh` rifà i modelli leggeri dagli originali (da 24-83 MB a circa 1 MB l'uno);
     `tests/galleria3d_shot.gd` e `tests/navi3d_shot.gd` li fotografano.
 - **Scheda dell'unità** come lo Spaceship Log: compartimenti con V/D/X, energia, missili per modulo,
@@ -60,6 +65,10 @@ repository è pubblico).
   resta salvata.
 - **Segui l'azione** nel replay: la telecamera accompagna le unità che si muovono e sparano (si può
   spegnere per guardare la mappa liberamente).
+- **Fine per stallo**: se le flotte si separano (nessun colpo a segno per 6 turni con le navi nemiche più
+  vicine a oltre 10 esagoni e senza avvicinarsi) o nessuno colpisce più per 10 turni (navi alla deriva con il
+  motore distrutto), la partita finisce: pareggio, o ai punti nell'Attacco al Convoglio Rosso. Le navi che
+  devono entrare in orbita virano subito verso il pianeta invece di restare alla deriva.
 - **Tre livelli d'IA** davvero diversi: la facile pianifica poco e non zigzaga, la difficile valuta più
   rotte e più varianti. Nello scenario Pirati! l'IA dei pirati evita di colpire il Corco Mu con i propri
   missili (distruggerlo darebbe il pareggio).
