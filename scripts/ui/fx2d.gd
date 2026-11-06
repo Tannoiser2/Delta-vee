@@ -92,6 +92,9 @@ static func shot(ci: CanvasItem, a: Vector2, b: Vector2, w: String, hit: bool, t
 			var q := a.lerp(tip, float(j + 1) / 9.0) + nrm * r.randf_range(-0.25, 0.25) * S
 			ci.draw_line(prev, q, Color(PLASMA2, 0.75), 2.0)
 			prev = q
+	# colpo mancato: la scritta sul bersaglio
+	if not hit and t > arrive:
+		float_text(ci, b, "mancato", false, clampf((t - arrive) / maxf(0.01, 1.0 - arrive), 0.0, 1.0), S, Color(0.75, 0.8, 0.9))
 	# impatto
 	if hit and t >= arrive * 0.95:
 		var k := clampf((t - arrive) / maxf(0.01, 1.0 - arrive), 0.0, 1.0)
@@ -169,3 +172,18 @@ static func boom(ci: CanvasItem, c: Vector2, t: float, S: float) -> void:
 		var p0 := c + v * dist
 		var col := Color("#ffd27a").lerp(Color("#c0402a"), t)
 		ci.draw_line(p0, p0 + v * S * 0.16, Color(col, 1.0 - t), 2.5 if i % 3 == 0 else 1.5)
+
+
+## scritta che sale e sfuma sopra un bersaglio (esito del colpo)
+static func float_text(ci: CanvasItem, p: Vector2, txt: String, bad: bool, t: float, S: float, col := Color(0, 0, 0, 0)) -> void:
+	if txt == "":
+		return
+	UI.init_fonts()
+	if col.a == 0.0:
+		col = UI.RED if bad else UI.YELLOW
+	var fs := int(S * (0.5 if bad else 0.4))
+	var al := clampf(minf(t / 0.12, (1.0 - t) / 0.3), 0.0, 1.0)
+	var pos := p + Vector2(0, -S * (0.9 + 0.7 * t))
+	var w := UI.font_bold.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	ci.draw_string_outline(UI.font_bold, pos - Vector2(w / 2, 0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 6, Color(0, 0, 0, 0.85 * al))
+	ci.draw_string(UI.font_bold, pos - Vector2(w / 2, 0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, al))

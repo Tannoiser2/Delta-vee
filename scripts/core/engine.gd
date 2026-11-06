@@ -60,6 +60,7 @@ var fire_budget := {}            # fuochi rimasti nella fase di fuoco: id -> {sr
 var guided_now := {}             # missili guidati con il comando di battaglia in questa fase
 var rdv_done := false
 var last_roll := 0
+var hit_txt: Array = []          # effetti dell'ultimo colpo, per la scritta sulla mappa
 
 # registrazione per la vista e il replay
 var reg := {}                    # id -> {side, kind, cls, label}
@@ -895,12 +896,14 @@ func _intercept(m: Dictionary, t: Dictionary, step := -1) -> void:
 	m["rev"] = true
 	if ch < 99 and roll > ch:
 		noint[key] = true
-		log_msg("%s manca l'intercettazione di %s (vel. relativa %d, serve ≤%d, dado %d)." % [uname(m), uname_for(t, m["side"]), rv, ch, roll])
-		_ev({"k": "miss", "at": t["hex"], "a": m["id"], "t": t["id"], "step": step})
+		log_msg("%s manca l'intercettazione di %s (vel. relativa %d, serve %d o meno, dado %d)." % [uname(m), uname_for(t, m["side"]), rv, ch, roll])
+		_ev({"k": "miss", "at": t["hex"], "a": m["id"], "t": t["id"], "step": step, "txt": "intercettazione fallita"})
+		if step < 0:
+			_rec({"k": "dmg", "id": t["id"], "at": t["hex"], "txt": "intercettazione fallita", "bad": false})
 		return
-	log_msg("%s intercetta %s! (vel. relativa %d, %s)" % [uname(m), uname_for(t, m["side"]), rv, "automatico" if ch >= 99 else "dado %d su ≤%d" % [roll, ch]])
+	log_msg("%s intercetta %s! (vel. relativa %d, %s)" % [uname(m), uname_for(t, m["side"]), rv, "automatico" if ch >= 99 else "dado %d, serviva %d o meno" % [roll, ch]])
 	m["st"] = "dead"
-	_ev({"k": "boom", "at": t["hex"], "a": m["id"], "t": t["id"], "step": step})
+	_ev({"k": "boom", "at": t["hex"], "a": m["id"], "t": t["id"], "step": step, "txt": "INTERCETTATO!"})
 	if t["kind"] == "ship" and ff_class(t) > 0:
 		if not t["ffon"]:
 			# [9.8] attivazione d'emergenza del campo di forza
@@ -921,10 +924,12 @@ func _intercept(m: Dictionary, t: Dictionary, step := -1) -> void:
 				await _apply_hit(t, d10(), phasing, false)
 			if step < 0:
 				_rec({"k": "boom", "at": t["hex"], "id": m["id"]})
+				_rec({"k": "dmg", "id": t["id"], "at": t["hex"], "txt": "Campo di forza: colpito", "bad": false})
 			return
 	_destroy(t, "distrutto dal missile")
 	if step < 0:
 		_rec({"k": "boom", "at": t["hex"], "id": t["id"]})
+		_rec({"k": "dmg", "id": t["id"], "at": t["hex"], "txt": "INTERCETTATO!", "bad": true})
 
 
 func _ev(e: Dictionary) -> void:
@@ -939,20 +944,25 @@ func _apply_hit(t: Dictionary, roll: int, chooser: int, asteroid := false) -> vo
 	if t["kind"] == "mis":
 		if roll == 2 or (roll == 1 and t["rev"] and not asteroid):
 			log_msg("Colpo (dado %d): %s è distrutto." % [roll, uname(t)])
+			hit_txt.append("MISSILE DISTRUTTO")
 			t["st"] = "dead"
 		else:
 			log_msg("Colpo (dado %d): il missile non ne risente." % roll)
+			hit_txt.append("nessun effetto")
 		return
 	var opts := []
 	if roll == 1:
 		if asteroid:
 			log_msg("Colpo critico dell'asteroide: nessun effetto.")
+			hit_txt.append("nessun effetto")
 			return
 		if not t["rev"]:
 			log_msg("Colpo critico su una pedina coperta: nessun effetto.")
+			hit_txt.append("nessun effetto")
 			return
 		opts = parts_of(t)
 		log_msg("Colpo critico (dado 1)!")
+		hit_txt.append("CRITICO!")
 	else:
 		var have := parts_of(t)
 		for p in D.HIT_TABLE[roll]:
@@ -960,6 +970,7 @@ func _apply_hit(t: Dictionary, roll: int, chooser: int, asteroid := false) -> vo
 				opts.append(p)
 		if opts.is_empty():
 			log_msg("Colpo di striscio (dado %d): nessuna parte colpita." % roll)
+			hit_txt.append("di striscio")
 			return
 	var part: String = opts[0]
 	if opts.size() > 1:
@@ -980,6 +991,10 @@ func _damage(t: Dictionary, part: String) -> void:
 	if before == after:
 		word = "già distrutto"
 	log_msg("Colpito %s di %s: %s." % [part_name(t, part), uname(t), word])
+	var short := D.PART_NAMES.get(part, "") as String
+	if part.begins_with("p"):
+		short = "modulo %d" % int(part.substr(1))
+	hit_txt.append("%s %s" % [short.capitalize(), word])
 	if after >= 2 and before < 2 and part.begins_with("p"):
 		var i := int(part.substr(1)) - 1
 		var p: Dictionary = t["pods"][i]
@@ -1575,14 +1590,19 @@ func _shoot(side: int, r: Dictionary) -> bool:
 	if ch < 99:
 		roll = d10()
 		hit = roll <= ch
-	log_msg(desc + (", serve ≤%d, dado %d: " % [ch, roll] if ch < 99 else ", colpo automatico: ") + ("COLPITO!" if hit else "mancato."))
-	_rec({"k": "fire", "a": u["id"], "t": t["id"], "w": w, "hit": hit})
+	log_msg(desc + (", serve %d o meno, dado %d: " % [ch, roll] if ch < 99 else ", colpo automatico: ") + ("COLPITO!" if hit else "mancato."))
+	_rec({"k": "fire", "a": u["id"], "t": t["id"], "w": w, "hit": hit, "roll": roll, "need": ch})
 	await _pace(1.0)
 	if hit:
+		hit_txt = []
 		await _apply_hit(t, d10(), side)
 		if t["st"] == "dead":
 			_rec({"k": "boom", "at": t["hex"], "id": t["id"]})
+			_rec({"k": "dmg", "id": t["id"], "at": t["hex"], "txt": "DISTRUTTO!", "bad": true})
 			await _pace(1.0)
+		else:
+			_rec({"k": "dmg", "id": t["id"], "at": t["hex"], "txt": ", ".join(hit_txt), "bad": false})
+			await _pace(0.8)
 	return true
 
 

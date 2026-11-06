@@ -47,13 +47,23 @@ repository è pubblico).
   detriti e fumo (`scripts/ui/fx2d.gd` e `board_3d.gd`).
 - **Illustrazioni** delle 12 classi di astronavi, dei caccia, dei missili e dei 23 moduli: nel menu, nella scheda
   dell'unità (stile Spaceship Log illustrato, `scripts/ui/ship_card.gd`), nel fuoco e nelle regole.
+- **Scritte di combattimento** sulla mappa (2D e 3D), in partita e nel replay: "mancato", "di striscio",
+  "CRITICO!", la parte colpita e il suo stato, "INTERCETTATO!", "DISTRUTTO!".
+- **Suoni** sintetizzati per ogni tipo di fuoco, missili, intercettazioni, impatti, esplosioni, motori e salto
+  (`tools/genera_suoni.py` li rigenera in `assets/audio/`); il pulsante **Audio sì/no** li spegne e la scelta
+  resta salvata.
+- **Segui l'azione** nel replay: la telecamera accompagna le unità che si muovono e sparano (si può
+  spegnere per guardare la mappa liberamente).
+- **Tre livelli d'IA** davvero diversi: la facile pianifica poco e non zigzaga, la difficile valuta più
+  rotte e più varianti. Nello scenario Pirati! l'IA dei pirati evita di colpire il Corco Mu con i propri
+  missili (distruggerlo darebbe il pareggio).
 - **Regole** riassunte in italiano con tutte le tabelle, dal menu e in partita.
 
 ## Comandi
 - Mappa 2D: trascina per spostare, rotella (o due dita) per lo zoom. **Centra** rifà l'inquadratura.
 - Tabellone 3D: trascina per ruotare, tasto destro (o Maiusc + trascina) per spostare, rotella per lo zoom.
 - Tocca una pedina per vederne la scheda (più pedine nello stesso esagono: tocca di nuovo).
-- Fase di comando: scegli l'unità nella striscia in alto a destra, poi velocità (− +), direzione (↺ ↻),
+- Fase di comando: scegli l'unità nella striscia in alto a destra, poi velocità (meno, più), direzione (Vira sx / Vira dx),
   scarto (tocca l'esagono azzurro) e comandi di battaglia. La linea gialla è il prossimo movimento.
 - Fase di fuoco: scegli unità e arma, poi il bersaglio sulla mappa (la percentuale è la probabilità di
   colpire) e **FUOCO!**; per i missili scegli l'esagono di lancio, la direzione e la velocità.
@@ -89,4 +99,9 @@ Dove il regolamento lascia spazio, la versione digitale fa così:
   `godot --headless --path . -s tests/sim.gd -- 0 4 1` (tutti gli scenari, 4 partite, IA normale).
 - `tests/online_play.gd` + `tests/firebase_mock.py` — partita online completa fra due istanze su un
   finto Firebase locale.
-- `tests/shot.gd` — fotografie dell'interfaccia (serve un display, anche virtuale).
+- `tests/shot.gd`, `replay_shot.gd`, `fx_shot.gd` — fotografie dell'interfaccia, del replay e degli
+  effetti (serve un display, anche virtuale).
+- `tools/controlla_glifi.py` — controlla che ogni carattere usato nei testi esista in tutti i font
+  (altrimenti sul web comparirebbe un quadratino).
+- Pubblicazione: solo a mano (Actions, *Run workflow*) o con un commit che contiene `[pubblica]`;
+  il workflow pubblica su GitHub Pages e su Cloudflare (`tools/pubblica_cloudflare.py`).

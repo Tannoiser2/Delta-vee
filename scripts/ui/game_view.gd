@@ -43,6 +43,35 @@ var rp_lbl: Label
 var rp_btn: Button
 var _rp_drag := false
 var rp_track: ReplayTrack
+var _rp_last := 0.0
+var rp_follow := true
+
+
+## la telecamera del replay segue l'azione: i colpi in corso o, se non ce ne sono, tutte le unità
+func _follow(st: Dictionary, dt: float) -> void:
+	var pts: Array = []
+	for f in st.get("fx", []):
+		if f.has("a") and f.has("b"):
+			pts.append(f["a"])
+			pts.append(f["b"])
+		elif f.has("p"):
+			pts.append(f["p"])
+	if pts.is_empty():
+		for id in st.get("units", {}):
+			pts.append(st["units"][id]["p"])
+	if pts.is_empty():
+		return
+	var c := Vector2.ZERO
+	for p in pts:
+		c += p
+	c /= pts.size()
+	var k := clampf(dt * 1.6, 0.0, 1.0)
+	if view3d:
+		board3d.target = board3d.target.lerp(Vector3(c.x, 0, c.y), k)
+		board3d._update_cam()
+	else:
+		var want: Vector2 = board2d.size * 0.5 - c * board2d.S * board2d.zoom
+		board2d.world.position = board2d.world.position.lerp(want, k)
 var ended := false
 var hover_lbl: Label
 var _last_fire := {}
@@ -177,6 +206,11 @@ func _build() -> void:
 		board2d.fit()
 		board3d.fit())
 	hb.add_child(bc)
+	var ba := UI.button("Audio sì" if main.audio_on else "Audio no", 104, 46, 18)
+	ba.pressed.connect(func():
+		main.set_audio(not main.audio_on)
+		ba.text = "Audio sì" if main.audio_on else "Audio no")
+	hb.add_child(ba)
 	var bl := UI.button("Diario", 90, 46, 18)
 	bl.pressed.connect(_toggle_log)
 	hb.add_child(bl)
@@ -294,6 +328,38 @@ func _on_fx(kind: String, data: Dictionary) -> void:
 		return
 	anim_idx = engine.history.size() - 1
 	anim_t0 = Time.get_ticks_msec() / 1000.0
+	_seg_sound(data, 1.0 / maxf(0.1, engine.anim))
+
+
+const WSND := {"lb": "laser", "lbb": "laser_sbarramento", "pb": "particelle", "pbb": "particelle_sbarramento"}
+
+## suoni di un segmento della partita (k = scala dei tempi)
+func _seg_sound(seg: Dictionary, k: float) -> void:
+	if main == null or engine.headless:
+		return
+	match str(seg.get("k", "")):
+		"fire":
+			var w := str(seg.get("w", "lb"))
+			main.sfx(WSND.get(w, "laser"), -4.0)
+			var pt: Array = FX2D.pattern(w)
+			var arrive: float = float(pt[1]) * (int(pt[0]) - 1) + float(pt[2])
+			main.sfx("impatto" if seg.get("hit", false) else "mancato", -3.0, arrive * k)
+		"boom":
+			main.sfx("esplosione", 0.0)
+		"launch":
+			main.sfx("missile", -4.0)
+		"jump":
+			main.sfx("salto", -2.0)
+		"move":
+			if int(seg.get("steps", 0)) > 0:
+				main.sfx("motori", -10.0)
+			var steps := maxi(1, int(seg.get("steps", 1)))
+			var dur := Timeline.duration(seg) * k
+			for ev in seg.get("ev", []):
+				var at := dur * float(ev.get("step", 0)) / steps
+				if ev["k"] == "boom":
+					main.sfx("intercetta", -6.0, at)
+					main.sfx("esplosione", 0.0, at + 0.05)
 
 
 func _process(_d: float) -> void:
@@ -596,6 +662,7 @@ func _btn(t: String, cb: Callable, primary := false, w := 0.0, parent: Control =
 	var b := UI.button(t, w, 42, 18)
 	if primary:
 		UI.primary(b)
+	b.pressed.connect(func(): main.sfx("clic", -8.0))
 	b.pressed.connect(cb)
 	if w == 0.0:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -765,7 +832,7 @@ func _cmd_maneuver(u: Dictionary) -> void:
 		o["a"] = a - 1
 		_rebuild(), false, 54, r1)
 	bm.disabled = nv <= (1 if u["kind"] == "mis" else 0) or a <= -int(lim["vr"]) or (used >= n and a <= 0)
-	var vl := UI.label("%d → %d" % [u["v"], nv], 24, UI.YELLOW, UI.font_bold)
+	var vl := UI.label("da %d a %d" % [u["v"], nv], 24, UI.YELLOW, UI.font_bold)
 	vl.custom_minimum_size.x = 90
 	vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	r1.add_child(vl)
@@ -777,15 +844,15 @@ func _cmd_maneuver(u: Dictionary) -> void:
 	var r2 := _row()
 	r2.add_child(UI.label("Direzione", 19, UI.TEXT, UI.font_semi))
 	var nd := posmod(int(u["dir"]) + t, 12)
-	var bl := _btn("←", func():
+	var bl := _btn("Sx", func():
 		o["t"] = t - 1
 		_rebuild(), false, 54, r2)
 	bl.disabled = lim["single"] or (used >= n and t <= 0)
-	var dl := UI.label("ore %s → %s" % [D.DIR_NAMES[u["dir"]], D.DIR_NAMES[nd]], 22, UI.YELLOW, UI.font_bold)
+	var dl := UI.label("da ore %s a ore %s" % [D.DIR_NAMES[u["dir"]], D.DIR_NAMES[nd]], 22, UI.YELLOW, UI.font_bold)
 	dl.custom_minimum_size.x = 150
 	dl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	r2.add_child(dl)
-	var br := _btn("→", func():
+	var br := _btn("Dx", func():
 		o["t"] = t + 1
 		_rebuild(), false, 54, r2)
 	br.disabled = lim["single"] or (used >= n and t >= 0)
@@ -940,7 +1007,7 @@ func _cmd_battle(u: Dictionary) -> void:
 			var tu: Dictionary = engine.units[aux["t"]]
 			_txt("Bersaglio: %s (vel. %d, ore %s)" % [engine.uname_for(tu, u["side"]), tu["v"], D.DIR_NAMES[tu["dir"]]], UI.TEXT, 17)
 			var r := _row()
-			for spec in [["−vel", "a", -1], ["+vel", "a", 1], ["←", "tt", -1], ["→", "tt", 1]]:
+			for spec in [["−vel", "a", -1], ["+vel", "a", 1], ["Vira sx", "tt", -1], ["Vira dx", "tt", 1]]:
 				var key: String = spec[1]
 				var dv: int = spec[2]
 				_btn(spec[0], func():
@@ -1026,7 +1093,7 @@ func _cmd_footer() -> void:
 		plan = {"m": {}, "b": []}
 		mode = ""
 		_rebuild(), false, 0, r)
-	_btn("Fine comandi →", func():
+	_btn("Fine comandi", func():
 		var m := {}
 		for id in plan["m"]:
 			var o: Dictionary = plan["m"][id]
@@ -1208,7 +1275,7 @@ func _build_fire() -> void:
 		else:
 			status_lbl.text = "L'IA non sparerebbe altro."
 		_rebuild(), false, 0, r)
-	_btn("Fine fuoco →", func(): _submit({}), true, 0, r)
+	_btn("Fine fuoco", func(): _submit({}), true, 0, r)
 
 
 func _fire_target_box(u: Dictionary) -> void:
@@ -1219,10 +1286,10 @@ func _fire_target_box(u: Dictionary) -> void:
 	var t: Dictionary = engine.units[tid]
 	var tv := engine.target_value(u, aux["src"], t)
 	var ch := engine.hit_chance(aux["w"], tv["tv"])
-	var info := "Bersaglio: %s\nGittata %d%s · velocità relativa %d · puntamento %d → valore %d" % [
+	var info := "Bersaglio: %s\nGittata %d%s · velocità relativa %d · puntamento %d = valore %d" % [
 		engine.uname_for(t, u["side"]), tv["range"], "" if tv["range"] == Hex.dist(u["hex"], t["hex"]) else " (dimezzata)", tv["rv"], tv["mod"], tv["tv"]]
 	_txt(info, UI.TEXT, 17)
-	var txt := "colpo impossibile" if ch <= 0 else ("colpo automatico" if ch >= 99 else "serve ≤%d sul d10 (%d%%)" % [ch, ch * 10])
+	var txt := "colpo impossibile" if ch <= 0 else ("colpo automatico" if ch >= 99 else "serve %d o meno sul d10 (%d%%)" % [ch, ch * 10])
 	_txt(txt, UI.YELLOW, 19, UI.font_bold)
 	var b := _btn("FUOCO!", func():
 		_last_fire = {"sel": u["id"], "src": aux["src"], "w": aux["w"]}
@@ -1285,23 +1352,23 @@ func _build_deploy() -> void:
 			_rebuild(), aux.get("ship", "") == id, 0, r)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if s["dir_free"] and not group:
-			_btn("←", func():
+			_btn("Sx", func():
 				plan["dir"][id] = posmod(int(plan["dir"][id]) - 1, 12)
 				_rebuild(), false, 44, r)
 			r.add_child(UI.label("ore %s" % D.DIR_NAMES[plan["dir"][id]], 18, UI.YELLOW))
-			_btn("→", func():
+			_btn("Dx", func():
 				plan["dir"][id] = posmod(int(plan["dir"][id]) + 1, 12)
 				_rebuild(), false, 44, r)
 	if group:
 		var first: String = pending["ships"][0]["id"]
 		var r := _row()
 		r.add_child(UI.label("Direzione di tutte", 18))
-		_btn("←", func():
+		_btn("Sx", func():
 			for s in pending["ships"]:
 				plan["dir"][s["id"]] = posmod(int(plan["dir"][first]) - 1, 12)
 			_rebuild(), false, 44, r)
 		r.add_child(UI.label("ore %s" % D.DIR_NAMES[plan["dir"][first]], 20, UI.YELLOW, UI.font_bold))
-		_btn("→", func():
+		_btn("Dx", func():
 			for s in pending["ships"]:
 				plan["dir"][s["id"]] = posmod(int(plan["dir"][first]) + 1, 12)
 			_rebuild(), false, 44, r)
@@ -1316,7 +1383,7 @@ func _build_deploy() -> void:
 		_btn("+", func():
 			plan["v"] = mini(int(vr[1]), int(plan["v"]) + 1)
 			_rebuild(), false, 44, r)
-	_btn("Conferma lo schieramento →", func():
+	_btn("Conferma lo schieramento", func():
 		_submit({"hex": plan["hex"], "dir": plan["dir"], "v": plan["v"]}), true)
 
 
@@ -1333,7 +1400,7 @@ func _build_planet() -> void:
 		if absi(a - 1) + absi(t) <= int(lim["n"]) and a - 1 >= -int(lim["vr"]) and int(u["v"]) + a - 1 >= 1:
 			plan["a"] = a - 1
 		_rebuild(), false, 50, r)
-	r.add_child(UI.label("%d → %d" % [u["v"], clampi(int(u["v"]) + a, 1, 9)], 22, UI.YELLOW, UI.font_bold))
+	r.add_child(UI.label("da %d a %d" % [u["v"], clampi(int(u["v"]) + a, 1, 9)], 22, UI.YELLOW, UI.font_bold))
 	_btn("+", func():
 		if absi(a + 1) + absi(t) <= int(lim["n"]) and a + 1 <= int(lim["vr"]):
 			plan["a"] = a + 1
@@ -1341,17 +1408,17 @@ func _build_planet() -> void:
 	if not lim["single"]:
 		var r2 := _row()
 		r2.add_child(UI.label("Direzione", 18))
-		_btn("←", func():
+		_btn("Sx", func():
 			if absi(a) + absi(t - 1) <= int(lim["n"]):
 				plan["t"] = t - 1
 			_rebuild(), false, 50, r2)
 		r2.add_child(UI.label("ore %s" % D.DIR_NAMES[posmod(int(u["dir"]) + t, 12)], 22, UI.YELLOW, UI.font_bold))
-		_btn("→", func():
+		_btn("Dx", func():
 			if absi(a) + absi(t + 1) <= int(lim["n"]):
 				plan["t"] = t + 1
 			_rebuild(), false, 50, r2)
 	_txt("Comandi usati: %d su %d" % [used, lim["n"]], UI.CYAN)
-	_btn("Conferma →", func(): _submit({"a": plan["a"], "t": plan["t"]}), true)
+	_btn("Conferma", func(): _submit({"a": plan["a"], "t": plan["t"]}), true)
 
 
 func _build_hitpart() -> void:
@@ -1440,6 +1507,11 @@ func start_replay() -> void:
 	_set_state(rp_track.state_at(0.0))
 	board2d.fit(true)
 	board3d.fit(true)
+	if rp_follow:
+		board2d.zoom = maxf(board2d.zoom, 0.5)
+		board2d.world.scale = Vector2(board2d.zoom, board2d.zoom)
+		board3d.dist = minf(board3d.dist, 30.0)
+		board3d._update_cam()
 	rp_play = true
 	sel = ""
 	_card()
@@ -1478,6 +1550,11 @@ func start_replay() -> void:
 		var b := UI.button("%s×" % ("½" if sp == 0.5 else str(int(sp))), 54, 44, 18)
 		b.pressed.connect(func(): rp_speed = s)
 		hb.add_child(b)
+	var fb := UI.button("Segui l'azione", 150, 44, 17)
+	fb.toggle_mode = true
+	fb.button_pressed = rp_follow
+	fb.toggled.connect(func(on): rp_follow = on)
+	hb.add_child(fb)
 	rp_slider = HSlider.new()
 	rp_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rp_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -1493,6 +1570,36 @@ func start_replay() -> void:
 	rp_lbl = UI.label("", 18, UI.YELLOW, UI.font_mono)
 	rp_lbl.custom_minimum_size.x = 260
 	hb.add_child(rp_lbl)
+
+
+func _replay_sounds(a: float, b: float) -> void:
+	if b <= a or b - a > 0.5:
+		return
+	for f in rp_track.fx:
+		var t0: float = f["t0"]
+		if t0 <= a or t0 > b:
+			continue
+		match f["k"]:
+			"beam":
+				var w := str(f["w"])
+				main.sfx(WSND.get(w, "laser"), -5.0)
+				var pt: Array = FX2D.pattern(w)
+				var arrive: float = (float(pt[1]) * (int(pt[0]) - 1) + float(pt[2])) * float(f["dur"])
+				main.sfx("impatto" if f["hit"] else "mancato", -4.0, arrive / maxf(0.25, rp_speed))
+			"boom":
+				main.sfx("esplosione", -1.0)
+			"puff":
+				main.sfx("missile", -5.0)
+			"warp":
+				main.sfx("salto", -3.0)
+			"text":
+				if str(f["txt"]) == "INTERCETTATO!":
+					main.sfx("intercetta", -6.0)
+	# motori all'inizio del movimento di ogni turno
+	var ta := (a - ReplayTrack.START) / ReplayTrack.TT
+	var tb := (b - ReplayTrack.START) / ReplayTrack.TT
+	if tb > 0 and floorf(ta - 0.05) != floorf(tb - 0.05):
+		main.sfx("motori", -10.0)
 
 
 func stop_replay() -> void:
@@ -1514,11 +1621,16 @@ func _replay_step(dt: float) -> void:
 			rp_play = false
 			if is_instance_valid(rp_btn):
 				rp_btn.text = "Avvia"
+	if rp_play and not _rp_drag:
+		_replay_sounds(_rp_last, rp_time)
+	_rp_last = rp_time
 	var st := rp_track.state_at(rp_time)
 	var b = board3d if view3d else board2d
 	b.viewer = [0, 1]
 	b.ov = {}
 	b.set_state(st)
+	if rp_follow:
+		_follow(st, dt)
 	if is_instance_valid(rp_slider) and not _rp_drag:
 		rp_slider.set_value_no_signal(rp_time)
 	if is_instance_valid(rp_lbl):

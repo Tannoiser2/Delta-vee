@@ -47,7 +47,7 @@ Un missile colpito si distrugge solo con 2 (o 1 se scoperto) sulla tabella dei c
 
 [font_size=26][color=#ef6f9c]Missili[/color][/font_size]
 Si lanciano in uno degli esagoni davanti alla nave, a velocità della nave ±1 (minimo 1). [b]Non guidati[/b]: accelerano di 1 a ogni vostra fase di comando. [b]Guidati[/b]: manovrano con il comando «Guida» della nave. [b]Intelligenti[/b]: manovrano da soli. [b]MIMS[/b]: come gli intelligenti, ma una volta possono aprirsi e lanciare quattro non guidati. Ogni manovra di un missile consuma un'unità della sua energia.
-[b]Intercettazione[/b]: quando un missile entra nell'esagono di un nemico (o un nemico entra nel suo), si tira il d10 contro la tabella per velocità relativa e civiltà del missile. Se riesce, missile e bersaglio esplodono; una nave con il campo di forza attivo subisce invece 3 tiri sulla tabella dei colpi (classe 1) o 1 (classe 2). Chi ha il campo di forza spento può provare ad accenderlo all'ultimo istante (d10 ≤ civiltà − 2).
+[b]Intercettazione[/b]: quando un missile entra nell'esagono di un nemico (o un nemico entra nel suo), si tira il d10 contro la tabella per velocità relativa e civiltà del missile. Se riesce, missile e bersaglio esplodono; una nave con il campo di forza attivo subisce invece 3 tiri sulla tabella dei colpi (classe 1) o 1 (classe 2). Chi ha il campo di forza spento può provare ad accenderlo all'ultimo istante (d10 pari o inferiore alla civiltà meno 2).
 Se l'intercettazione fallisce, quei due non ci riprovano finché restano nello stesso esagono.
 
 [font_size=26][color=#ef6f9c]Rilevamento[/color][/font_size]
@@ -148,7 +148,7 @@ func _tables() -> String:
 		for mt in D.MTYPES:
 			cells.append(("%d%s" % [p.get(mt, 0), "*" if mt in p.get("prep", []) else ""]))
 		t += "%-14s %4s %4s %4s %4s %4d %4d %4d %4d\n" % [p["name"].substr(0, 14), cells[0], cells[1], cells[2], cells[3], p["bcmd"], p.get("civ", 0), p.get("tp", 0), p["fires"]]
-	t += "[/code]\n[color=#ef6f9c][b]Risultati del fuoco [8.6][/b][/color] (d10 ≤ valore; A = automatico)\n[code]"
+	t += "[/code]\n[color=#ef6f9c][b]Risultati del fuoco [8.6][/b][/color] (colpisce con un d10 pari o inferiore al valore; A = automatico)\n[code]"
 	t += "%-26s %3s %3s %4s %4s %4s %4s %5s %5s\n" % ["Valore del bersaglio", "0", "1", "2-3", "4-5", "6-7", "8-9", "10-11", "12-14"]
 	for w in ["lb", "lbb", "pb", "pbb"]:
 		var row: Array = D.FIRE[w]["row"]
@@ -156,7 +156,7 @@ func _tables() -> String:
 		for v in row:
 			c.append("A" if v >= 99 else ("-" if v == 0 else str(v)))
 		t += "%-26s %3s %3s %4s %4s %4s %4s %5s %5s\n" % ["%s (%d u.)" % [D.FIRE[w]["name"], D.FIRE[w]["cost"]], c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]
-	t += "[/code]\n[color=#ef6f9c][b]Intercettazione [9.7][/b][/color] (d10 ≤ valore)\n[code]"
+	t += "[/code]\n[color=#ef6f9c][b]Intercettazione [9.7][/b][/color] (riesce con un d10 pari o inferiore al valore)\n[code]"
 	t += "%-12s %3s %4s %4s %4s %5s %4s\n" % ["Civiltà", "0", "1-2", "3-4", "5-7", "8-10", "11+"]
 	for civ in [6, 7, 8]:
 		var c := []

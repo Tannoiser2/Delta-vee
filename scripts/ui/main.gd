@@ -10,6 +10,54 @@ var lobby := {}
 var menu_state := {}
 
 
+# ---------------------------------------------------------------- effetti sonori
+
+const CFG := "user://deltavee.cfg"
+var audio_on := true
+var _players: Array = []
+var _streams := {}
+
+
+func _audio_init() -> void:
+	var c := ConfigFile.new()
+	if c.load(CFG) == OK:
+		audio_on = bool(c.get_value("audio", "on", true))
+	for i in 10:
+		var p := AudioStreamPlayer.new()
+		add_child(p)
+		_players.append(p)
+
+
+func set_audio(on: bool) -> void:
+	audio_on = on
+	var c := ConfigFile.new()
+	c.load(CFG)
+	c.set_value("audio", "on", on)
+	c.save(CFG)
+
+
+## suona un effetto di assets/audio (nome senza estensione); delay in secondi
+func sfx(name: String, vol_db := 0.0, delay := 0.0, pitch := 1.0) -> void:
+	if not audio_on or DisplayServer.get_name() == "headless":
+		return
+	if delay > 0.0:
+		get_tree().create_timer(delay).timeout.connect(func(): sfx(name, vol_db, 0.0, pitch))
+		return
+	if not _streams.has(name):
+		_streams[name] = load("res://assets/audio/%s.wav" % name)
+	if _streams[name] == null:
+		return
+	var best: AudioStreamPlayer = _players[0]
+	for p in _players:
+		if not p.playing:
+			best = p
+			break
+	best.stream = _streams[name]
+	best.volume_db = vol_db
+	best.pitch_scale = pitch
+	best.play()
+
+
 func get_net() -> Net:
 	if net == null:
 		net = Net.new()
@@ -21,6 +69,7 @@ func _ready() -> void:
 	theme = UI.make_theme()
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(UI.Starfield.new())
+	_audio_init()
 	show_menu()
 
 

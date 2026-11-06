@@ -45,6 +45,8 @@ func set_engine(e: DVEngine) -> void:
 
 func set_state(st: Dictionary) -> void:
 	state = st
+	if grid == null:
+		return
 	var mk := str(st.get("maps", {}).keys())
 	if mk != _maps_key:
 		_maps_key = mk
@@ -408,6 +410,8 @@ class UnitLayer extends Node2D:
 			"spark":
 				var c: Vector2 = f["p"] * S
 				draw_arc(c, S * (0.3 + 0.6 * t), 0, TAU, 24, Color(UI.CYAN, 1.0 - t), 2.0)
+			"text":
+				FX2D.float_text(self, f["p"] * S, str(f["txt"]), bool(f["bad"]), t, S)
 			"warp":
 				var c: Vector2 = f["p"] * S
 				draw_circle(c, S * (0.2 + 2.0 * t), Color(0.7, 0.85, 1.0, 0.5 * (1.0 - t)))

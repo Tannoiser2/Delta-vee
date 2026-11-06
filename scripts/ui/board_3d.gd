@@ -9,7 +9,7 @@ signal hex_hovered(h: Vector2i)
 
 const D = preload("res://scripts/data/dv_data.gd")
 const BW := 24.0                 # larghezza di un blocco di mappa (lato esagono = 1)
-const BH := 31.17691             # altezza: 18 × √3
+const BH := 31.17691             # altezza: 18 × radice di 3
 
 var eng: DVEngine
 var state := {"units": {}, "fx": [], "maps": {}}
@@ -798,6 +798,8 @@ func _draw_fx() -> void:
 			"spark":
 				var c: Vector2 = f["p"]
 				_flash(Vector3(c.x, 0.55, c.y), 0.2 + t * 0.5, UI.CYAN, (1.0 - t) * 0.6)
+			"text":
+				_text3(f["p"], str(f["txt"]), bool(f["bad"]), t)
 			"warp":
 				var c: Vector2 = f["p"]
 				_flash(Vector3(c.x, 0.55, c.y), 0.3 + t * 2.0, Color(0.7, 0.85, 1.0), (1.0 - t) * 0.7)
@@ -923,6 +925,8 @@ func _shot3(a2: Vector2, b2: Vector2, w: String, hit: bool, t: float) -> void:
 				cy.radial_segments = 4
 				_fxmesh(cy, _glow(FX2D.PLASMA2, 0.85), (prev + p2) * 0.5, Basis(Quaternion(Vector3.UP, seg.normalized())))
 			prev = p2
+	if not hit and t > arrive:
+		_text3(b2, "mancato", false, clampf((t - arrive) / maxf(0.01, 1.0 - arrive), 0.0, 1.0), Color(0.75, 0.8, 0.9))
 	if hit and t >= arrive * 0.95:
 		var k := clampf((t - arrive) / maxf(0.01, 1.0 - arrive), 0.0, 1.0)
 		var big := w.ends_with("bb")
@@ -974,6 +978,27 @@ func _boom3(c2: Vector2, t: float) -> void:
 		bx.size = Vector3(0.07, 0.05, 0.12)
 		_fxmesh(bx, _glow(Color("#ffd27a").lerp(Color("#c0402a"), t), clampf(1.0 - t, 0.0, 1.0)), c + v * sp * (1.0 - pow(1.0 - t, 2.0)), Basis.from_euler(Vector3(t * 9 + i, t * 7, i)))
 	_light(c, Color(1.0, 0.6, 0.25), 6.0 * (1.0 - t), 5.0)
+
+
+func _text3(p: Vector2, txt: String, bad: bool, t: float, col := Color(0, 0, 0, 0)) -> void:
+	if txt == "":
+		return
+	if col.a == 0.0:
+		col = UI.RED if bad else UI.YELLOW
+	var al := clampf(minf(t / 0.12, (1.0 - t) / 0.3), 0.0, 1.0)
+	var lb := Label3D.new()
+	lb.text = txt
+	lb.font = UI.font_bold
+	lb.font_size = 72 if bad else 60
+	lb.pixel_size = 0.006
+	lb.modulate = Color(col, al)
+	lb.outline_size = 14
+	lb.outline_modulate = Color(0, 0, 0, al * 0.9)
+	lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lb.no_depth_test = true
+	lb.position = Vector3(p.x, 1.3 + 0.8 * t, p.y)
+	root3.add_child(lb)
+	_fx_nodes.append(lb)
 
 
 func _flash(p: Vector3, r: float, col: Color, al: float) -> void:

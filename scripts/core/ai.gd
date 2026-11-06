@@ -194,7 +194,8 @@ func _plan_unit(e: DVEngine, u: Dictionary, enemies: Array) -> Dictionary:
 	var best := {}
 	var best_score := -1e18
 	var cands := []
-	var tmax := mini(n, 3)
+	# il livello cambia quanto si guarda attorno: facile 2 virate e niente scarti, difficile 4 virate
+	var tmax := mini(n, [2, 3, 4][clampi(level, 0, 2)])
 	for a in range(-vrm, vrm + 1):
 		var nv: int = int(u["v"]) + a
 		if nv < 0 or nv > 9:
@@ -206,14 +207,14 @@ func _plan_unit(e: DVEngine, u: Dictionary, enemies: Array) -> Dictionary:
 				continue
 			cands.append([a, t, null])
 	# scarto laterale: solo per astronavi e caccia con il ponte intatto
-	var can_weave: bool = not lim["single"] and e.part_state(u, "bridge") < 2
+	var can_weave: bool = not lim["single"] and e.part_state(u, "bridge") < 2 and level > 0
 	var scored := []
 	for c in cands:
 		var sc := _score_state(e, u, g, c[0], c[1], null, enemies)
 		scored.append([sc, c])
 	scored.sort_custom(func(x, y): return x[0] > y[0])
 	if can_weave and n >= 1:
-		var top := scored.slice(0, 4)
+		var top := scored.slice(0, 8 if level >= 2 else 4)
 		for item in top:
 			var c: Array = item[1]
 			if absi(c[0]) + absi(c[1]) + 1 > n:
@@ -641,6 +642,11 @@ func _missile_score(e: DVEngine, u: Dictionary, a: int, t: int, enemies: Array) 
 	var score := -20.0
 	var side: int = u["side"]
 	var civ := clampi(int(u["civ"]), 6, 8)
+	var prey_hit := {}
+	for h in hs:
+		prey_hit[h] = true
+	if _hits_prey(e, side, endh, prey_hit):
+		return -500.0
 	for t2 in enemies:
 		if t2["kind"] == "mis" or not t2.get("alerted", true):
 			continue
@@ -672,6 +678,23 @@ func _missile_score(e: DVEngine, u: Dictionary, a: int, t: int, enemies: Array) 
 		else:
 			score = maxf(score, (25.0 - Hex.dist(endh, P) * 3.0) * w)
 	return score
+
+
+## scenario 4: i missili pirati non devono colpire il Corco Mu (distruggerlo dà il pareggio)
+func _hits_prey(e: DVEngine, side: int, at: Vector2i, cells: Dictionary) -> bool:
+	if e.scn != 3 or side != 1:
+		return false
+	var mu: Dictionary = e.units.get("0sB", {})
+	if mu.is_empty() or mu["st"] != "on":
+		return false
+	if cells.has(mu["hex"]):
+		return true
+	var mp: Array = Hex.path(mu["hex"], mu["dir"], mu["zig"], mu["v"])[0]
+	if at in mp:
+		return true
+	if not mp.is_empty() and cells.has(mp[-1]):
+		return true
+	return false
 
 
 # ================================================================ fuoco
@@ -756,6 +779,8 @@ func _best_launch(e: DVEngine, u: Dictionary, lo: Dictionary) -> Dictionary:
 			for v in e.launch_vels(u):
 				var val := 0.0
 				var reach := _reach_from(e, mt, civ, sp[0], d, 0, v, eu)
+				if _hits_prey(e, u["side"], sp[0], reach):
+					continue
 				for t in enemies:
 					if t["kind"] == "mis":
 						continue

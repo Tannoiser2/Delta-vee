@@ -27,6 +27,7 @@ func _run() -> void:
 			b = load("res://scripts/ui/board_3d.gd").new()
 		b.size = Vector2(1600, 900)
 		root.add_child(b)
+		await process_frame
 		b.set_engine(e)
 		var base := Timeline.from_snapshot(e.snapshot(), e.reg, e.maps)
 		b.set_state(base)

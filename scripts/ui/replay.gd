@@ -118,6 +118,8 @@ func build(hist: Array, p_reg: Dictionary) -> void:
 						_die(tid, tt)
 				else:
 					fx.append({"k": "spark", "t0": tt, "dur": 0.4, "at": Timeline.pos_of(ev["at"])})
+				if ev.has("txt"):
+					fx.append({"k": "text", "t0": tt, "dur": 1.1, "id": "", "at": Timeline.pos_of(ev["at"]), "txt": ev["txt"], "bad": ev["k"] == "boom"})
 		match k:
 			"fire":
 				fx.append({"k": "beam", "t0": t0, "dur": maxf(0.75, minf(1.0, t1 - t0)), "a": s["a"], "t": s["t"], "w": s.get("w", "lb"), "hit": s.get("hit", false)})
@@ -127,6 +129,8 @@ func build(hist: Array, p_reg: Dictionary) -> void:
 				fx.append({"k": "puff", "t0": t0, "dur": 0.4, "id": s.get("a", "")})
 			"jump":
 				fx.append({"k": "warp", "t0": t0, "dur": 0.8, "at": Timeline.pos_of(s["at"])})
+			"dmg":
+				fx.append({"k": "text", "t0": t0 + 0.2, "dur": 1.1, "id": s.get("id", ""), "at": Timeline.pos_of(s["at"]), "txt": s["txt"], "bad": s.get("bad", false)})
 		# nascite, morti e cambi di stato
 		for id in cur:
 			var e: Array = cur[id]
@@ -263,6 +267,11 @@ func state_at(t: float) -> Dictionary:
 			"puff":
 				if keys.has(f["id"]):
 					out_fx.append({"k": "puff", "p": pos_at(f["id"], t), "t": tt})
+			"text":
+				var pp: Vector2 = f["at"]
+				if f["id"] != "" and keys.has(f["id"]):
+					pp = pos_at(f["id"], minf(t, float(life.get(f["id"], [0, INF])[1])))
+				out_fx.append({"k": "text", "p": pp, "txt": f["txt"], "bad": f["bad"], "t": tt})
 			_:
 				out_fx.append({"k": f["k"], "p": f["at"], "t": tt})
 	var mp := {}

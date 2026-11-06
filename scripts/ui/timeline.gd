@@ -21,6 +21,8 @@ static func duration(seg: Dictionary) -> float:
 			return 0.5
 		"cmd":
 			return 0.35
+		"dmg":
+			return 0.9
 		"start", "end":
 			return 0.3
 	return 0.3
@@ -105,6 +107,8 @@ static func state_at(hist: Array, i: int, t: float, reg: Dictionary) -> Dictiona
 				fx.append({"k": "boom", "p": pos_of(ev["at"]), "t": (t - st) / 0.5})
 			elif ev["k"] == "miss":
 				fx.append({"k": "spark", "p": pos_of(ev["at"]), "t": (t - st) / 0.3})
+			if ev.has("txt"):
+				fx.append({"k": "text", "p": pos_of(ev["at"]), "txt": ev["txt"], "bad": ev["k"] == "boom", "t": (t - st) / 0.9})
 	else:
 		var ids := {}
 		for id in prev:
@@ -133,6 +137,9 @@ static func state_at(hist: Array, i: int, t: float, reg: Dictionary) -> Dictiona
 				fx.append({"k": "boom", "p": pos_of(seg["at"]), "t": t})
 			"jump":
 				fx.append({"k": "warp", "p": pos_of(seg["at"]), "t": t})
+			"dmg":
+				var pd = _where(seg.get("id", ""), cur, prev)
+				fx.append({"k": "text", "p": pd if pd != null else pos_of(seg["at"]), "txt": seg["txt"], "bad": seg.get("bad", false), "t": t})
 			"launch":
 				var pa = _where(seg.get("a", ""), cur, prev)
 				if pa != null:
