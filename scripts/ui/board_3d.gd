@@ -31,6 +31,11 @@ var _tile_tex: Texture2D        # fondo: puntini al centro, logo e bussola
 var _grid_tex: Texture2D        # griglia e sigle degli esagoni, su fondo trasparente
 var grid_alpha := 1.0
 var _grid_mats: Array = []
+var _planet_nodes: Array = []
+const PLANET_Y := 1.85           # il pianeta galleggia sopra il suo esagono
+var trail := Trail.new()
+var _trail_mesh: MeshInstance3D
+var _trail_was := false
 var _units := {}                 # id -> {node, token, model, vel, key}
 var _ov_mesh: MeshInstance3D
 var _fx_root: Node3D
@@ -112,6 +117,7 @@ func set_state(st: Dictionary) -> void:
 		_static_done = true
 		_build_static()
 	_sync_units()
+	trail.update(st.get("units", {}), eng)
 	_ov_dirty = true
 
 
@@ -122,6 +128,14 @@ func redraw() -> void:
 func _process(_d: float) -> void:
 	if not is_visible_in_tree():
 		return
+	var tsec := Time.get_ticks_msec() / 1000.0
+	for pn in _planet_nodes:
+		Planets.spin_3d(pn, tsec)
+	var act := trail.active()
+	if act or _trail_was:
+		trail.prune(tsec)
+		_draw_trails(tsec)
+	_trail_was = act
 	if _ov_dirty or not state.get("fx", []).is_empty():
 		_ov_dirty = false
 		_draw_overlay()
@@ -392,40 +406,21 @@ func _build_maps() -> void:
 func _build_static() -> void:
 	for h in eng.planets:
 		var c := Hex.center(h, 1.0)
-		var sp := MeshInstance3D.new()
-		var sm := SphereMesh.new()
-		sm.radius = 0.75
-		sm.height = 1.5
-		sp.mesh = sm
-		var mat := StandardMaterial3D.new()
-		mat.albedo_texture = UI.tex("res://assets/markers/pianeta.png")
-		mat.uv1_scale = Vector3(1.6, 1, 1)
-		mat.albedo_color = Color(0.75, 0.85, 1.0)
-		mat.emission_enabled = true
-		mat.emission = Color(0.1, 0.2, 0.4)
-		sp.material_override = mat
-		sp.position = Vector3(c.x, 0.9, c.y)
-		root3.add_child(sp)
-		var atm := MeshInstance3D.new()
-		var am := SphereMesh.new()
-		am.radius = 0.86
-		am.height = 1.72
-		atm.mesh = am
-		var amat := StandardMaterial3D.new()
-		amat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		amat.albedo_color = Color(0.4, 0.7, 1.0, 0.18)
-		amat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		atm.material_override = amat
-		sp.add_child(atm)
+		var pn := Planets.node_3d(eng.sc.get("planet_name", ""))
+		pn.position = Vector3(c.x, PLANET_Y, c.y)
+		root3.add_child(pn)
+		_planet_nodes.append(pn)
 		var lb := Label3D.new()
 		lb.text = eng.sc.get("planet_name", "")
 		lb.font = UI.font_bold
-		lb.font_size = 64
+		lb.font_size = 72
 		lb.pixel_size = 0.01
 		lb.modulate = UI.CYAN
+		lb.outline_size = 12
+		lb.outline_modulate = Color(0, 0, 0, 0.8)
 		lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		lb.position = Vector3(0, 1.2, 0)
-		sp.add_child(lb)
+		lb.position = Vector3(0, Planets.R + 0.55, 0)
+		pn.add_child(lb)
 	var rr := RandomNumberGenerator.new()
 	rr.seed = 7
 	var rock := StandardMaterial3D.new()
@@ -655,6 +650,61 @@ func _model(kind: String, cls: String, side: int) -> Node3D:
 	return n
 
 
+## scie: nastri orizzontali all'altezza dei modelli, che sbiadiscono
+func _draw_trails(now: float) -> void:
+	if _trail_mesh == null:
+		_trail_mesh = MeshInstance3D.new()
+		_trail_mesh.mesh = ImmediateMesh.new()
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.vertex_color_use_as_albedo = true
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.no_depth_test = false
+		_trail_mesh.material_override = m
+		_trail_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root3.add_child(_trail_mesh)
+	var im: ImmediateMesh = _trail_mesh.mesh
+	im.clear_surfaces()
+	var verts := []
+	for id in trail.pts:
+		var arr: Array = trail.pts[id]
+		if arr.size() < 2:
+			continue
+		var kd := trail.kind(id, eng)
+		var col: Color = trail.color(id, eng)
+		var hy := 0.95 if kd == "ship" else 0.75
+		var wd := 0.14 if kd == "ship" else 0.08
+		for i in range(1, arr.size()):
+			var a: Vector2 = arr[i - 1][1]
+			var b: Vector2 = arr[i][1]
+			var ka := 1.0 - clampf((now - float(arr[i - 1][0])) / Trail.LIFE, 0.0, 1.0)
+			var kb := 1.0 - clampf((now - float(arr[i][0])) / Trail.LIFE, 0.0, 1.0)
+			if kb <= 0.0:
+				continue
+			var dv := (b - a)
+			if dv.length() < 0.0001:
+				continue
+			var nrm := Vector2(-dv.y, dv.x).normalized()
+			var wa := nrm * wd * (0.3 + 0.7 * ka)
+			var wb := nrm * wd * (0.3 + 0.7 * kb)
+			var ca := Color(col, 0.8 * ka)
+			var cb := Color(col, 0.8 * kb)
+			var p1 := Vector3(a.x + wa.x, hy, a.y + wa.y)
+			var p2 := Vector3(a.x - wa.x, hy, a.y - wa.y)
+			var p3 := Vector3(b.x + wb.x, hy, b.y + wb.y)
+			var p4 := Vector3(b.x - wb.x, hy, b.y - wb.y)
+			verts.append_array([[p1, ca], [p2, ca], [p3, cb], [p2, ca], [p4, cb], [p3, cb]])
+	if verts.is_empty():
+		return
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for vv in verts:
+		im.surface_set_color(vv[1])
+		im.surface_add_vertex(vv[0])
+	im.surface_end()
+
+
 ## lunghezza dei getti: cresce con la velocità e con la potenza dei motori (manovra della nave)
 func _set_flames(m: Node3D, kind: String, cls: String, v: int, on: bool) -> void:
 	var mr := 9.0 if kind != "ship" else float(D.SHIPS.get(cls, {}).get("mr", 6))
@@ -707,6 +757,9 @@ func _sync_units() -> void:
 			seen[hk] = idx + 1
 		var lift := idx * 0.1
 		var p: Vector2 = u["p"]
+		var above := 0.0
+		if eng != null and eng.is_planet(hk):
+			above = PLANET_Y + Planets.R + 0.2 - 0.95
 		var off := Vector2(idx, -idx) * 0.18 if stacks.get(hk, 1) > 1 else Vector2.ZERO
 		if f & 8:
 			off = Vector2(-0.3, 0.3)
@@ -722,14 +775,14 @@ func _sync_units() -> void:
 				eng_on = eng.part_state(eng.units[id], "engine") < 3 and eng.units[id]["st"] != "dead"
 			_set_flames(e["model"], r["kind"], r["cls"], int(u["v"]), eng_on)
 			if e.has("stick"):
-				var top: float = e["hy"] + idx * 0.4
+				var top: float = e["hy"] + idx * 0.4 + above
 				e["stick"].scale.y = top / e["hy"]
 				e["stick"].position.y = top * 0.5
-			e["model"].position.y = (0.95 if r["kind"] == "ship" else 0.75) + idx * 0.4 + sin(Time.get_ticks_msec() * 0.002 + p.x) * 0.03
+			e["model"].position.y = above + (0.95 if r["kind"] == "ship" else 0.75) + idx * 0.4 + sin(Time.get_ticks_msec() * 0.002 + p.x) * 0.03
 		if e.has("vel"):
 			e["vel"].text = str(u["v"])
 			if e.has("hy"):
-				e["vel"].position.y = e["hy"] + (0.55 if r["kind"] == "ship" else 0.35) + idx * 0.4
+				e["vel"].position.y = e["hy"] + (0.55 if r["kind"] == "ship" else 0.35) + idx * 0.4 + above
 		if e.has("ff"):
 			e["ff"].visible = (f & 2) != 0
 

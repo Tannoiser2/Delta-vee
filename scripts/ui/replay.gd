@@ -6,7 +6,7 @@ extends RefCounted
 ##
 ## Nel turno (durata TT):
 ##   0.00-0.05  comandi del Giocatore 2 (virate, scarti)
-##   0.05-0.90  movimento di tutti
+##   0.00-1.00  movimento di tutti, senza pause fra un turno e l'altro (ognuno alla sua velocità)
 ##   0.30-0.62  fuoco del Giocatore 1   ·   0.62-0.90  fuoco del Giocatore 2
 ##   0.90-1.00  comandi del Giocatore 1
 ## I raggi collegano le posizioni delle navi nell'istante in cui sono mostrati; i missili lanciati escono
@@ -72,11 +72,14 @@ func build(hist: Array, p_reg: Dictionary) -> void:
 			t0 = last_t
 			t1 = last_t + 0.5
 		elif k == "move":
-			t0 = base + TT * 0.05
-			t1 = base + TT * 0.90
+			# movimento lungo tutto il turno: alla fine di un turno comincia subito il successivo
+			t0 = base
+			t1 = base + TT
 		elif ph == "cmd" or k == "cmd":
-			t0 = base + (0.0 if side == 1 else TT * 0.90)
-			t1 = t0 + TT * 0.05 + (0.0 if side == 1 else TT * 0.05)
+			# i comandi (virate, scarti) cadono al confine fra due turni, dove il movimento è fermo
+			# su un esagono: così non spezzano il moto continuo
+			t0 = base if side == 1 else base + TT
+			t1 = t0 + 0.02
 		elif win.has(i):
 			t0 = win[i][0]
 			t1 = win[i][1]
@@ -97,8 +100,7 @@ func build(hist: Array, p_reg: Dictionary) -> void:
 				var path: Array = paths[id]
 				var n := path.size() - 1
 				var e: Array = cur[id] if cur.has(id) else (prev[id] if prev.has(id) else [path[0], 0, 0, 0])
-				var vprev: int = int(prev[id][2]) if prev.has(id) else n
-				var den := maxi(maxi(n, vprev), 1)
+				var den := maxi(n, 1)
 				for j in path.size():
 					_key(id, t0 + span * j / den, Timeline.pos_of(path[j]), int(e[1]))
 				if not cur.has(id):

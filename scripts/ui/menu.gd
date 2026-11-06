@@ -19,6 +19,7 @@ var sc_text: RichTextLabel
 var seat_rows: Array = []
 var sc_btns: Array = []
 var sc_ships: HBoxContainer
+var cover: Control               # copertina: quella nuova quando si sceglie il tabellone 3D
 
 
 func _ready() -> void:
@@ -46,7 +47,8 @@ func _ready() -> void:
 	fs.shadow_size = 18
 	frame.add_theme_stylebox_override("panel", fs)
 	frame.position = Vector2(70, 70)
-	frame.add_child(UI.icon_rect(UI.tex("res://assets/misc/copertina.webp"), Vector2(560, 739)))
+	cover = UI.icon_rect(_cover_tex(), Vector2(560, 739))
+	frame.add_child(cover)
 	page.add_child(frame)
 	var t1 := UI.title("DeltaVee", 104)
 	t1.position = Vector2(70, 830)
@@ -109,7 +111,9 @@ func _ready() -> void:
 	var o1 := HBoxContainer.new()
 	o1.add_theme_constant_override("separation", 26)
 	col.add_child(o1)
-	o1.add_child(_segmented("Vista", ["Mappa 2D", "Tabellone 3D"], view3d, func(k): view3d = k, 150))
+	o1.add_child(_segmented("Vista", ["Mappa 2D", "Tabellone 3D"], view3d, func(k):
+		view3d = k
+		_set_cover(), 150))
 	o1.add_child(_segmented("Turni massimi", ["20", "30", "40", "60"], turns, func(k): turns = k, 64))
 	var o2 := HBoxContainer.new()
 	o2.add_theme_constant_override("separation", 26)
@@ -137,6 +141,18 @@ func _ready() -> void:
 	msg = UI.label("", 20, UI.PINK)
 	col.add_child(msg)
 	_refresh()
+
+
+func _cover_tex() -> Texture2D:
+	return UI.tex("res://assets/misc/copertina3d.webp" if view3d == 1 else "res://assets/misc/copertina.webp")
+
+
+func _set_cover() -> void:
+	if cover is TextureRect:
+		(cover as TextureRect).texture = _cover_tex()
+	else:
+		for c in cover.find_children("*", "TextureRect", true, false):
+			(c as TextureRect).texture = _cover_tex()
 
 
 func _center() -> void:

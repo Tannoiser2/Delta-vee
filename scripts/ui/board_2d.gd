@@ -18,6 +18,11 @@ var world: Node2D
 var grid: Node2D
 var grid_alpha := 1.0
 var layer: Node2D
+var planets: Node2D              # pianeti e lune che girano
+var trails: Node2D               # scie di astronavi e missili
+var trail := Trail.new()
+var _planets_done := false
+var _trail_was := false
 var zoom := 0.6
 var _drag := false
 var _drag_from := Vector2.ZERO
@@ -34,6 +39,11 @@ func _ready() -> void:
 	grid = GridLayer.new()
 	grid.board = self
 	world.add_child(grid)
+	planets = Node2D.new()
+	world.add_child(planets)
+	trails = TrailLayer.new()
+	trails.board = self
+	world.add_child(trails)
 	layer = UnitLayer.new()
 	layer.board = self
 	world.add_child(layer)
@@ -48,6 +58,11 @@ func set_state(st: Dictionary) -> void:
 	state = st
 	if grid == null:
 		return
+	if not _planets_done and eng != null:
+		_planets_done = true
+		for h in eng.planets:
+			planets.add_child(Planets.node_2d(Hex.center(h, S), S, eng.sc.get("planet_name", "")))
+	trail.update(st.get("units", {}), eng)
 	var mk := str(st.get("maps", {}).keys())
 	if mk != _maps_key:
 		_maps_key = mk
@@ -172,6 +187,11 @@ func _zoom_at(p: Vector2, f: float) -> void:
 func _process(_d: float) -> void:
 	if not state.get("fx", []).is_empty():
 		layer.queue_redraw()
+	var act := trail.active()
+	if act or _trail_was:
+		trail.prune(Time.get_ticks_msec() / 1000.0)
+		trails.queue_redraw()
+	_trail_was = act
 
 
 # ================================================================ griglia
@@ -230,15 +250,15 @@ class GridLayer extends Node2D:
 				var cc := Hex.center(h, S)
 				draw_colored_polygon(Hex.corners(cc, S * 0.98), Color(0.5, 0.42, 0.35, 0.18))
 				_rocks(cc, S, h)
-			var pl: Texture2D = UI.tex("res://assets/markers/pianeta.png")
+			# il pianeta vero e proprio (che gira, con le lune) è in board.planets; qui il suo esagono e il nome
 			for h in board.eng.planets:
 				var cc := Hex.center(h, S)
-				draw_circle(cc, S * 0.95, Color(0.3, 0.55, 0.9, 0.18))
-				if pl != null:
-					draw_texture_rect(pl, Rect2(cc - Vector2(S, S) * 0.82, Vector2(S, S) * 1.64), false)
+				var pts := Hex.corners(cc, S * 0.96)
+				pts.append(pts[0])
+				draw_polyline(pts, Color(UI.CYAN, 0.6), 2.0)
 				var nm: String = board.eng.sc.get("planet_name", "Pianeta")
-				var ww := UI.font_bold.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, int(S * 0.42)).x
-				draw_string(UI.font_bold, cc + Vector2(-ww / 2, S * 1.25), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, int(S * 0.42), UI.CYAN)
+				var ww := UI.font_bold.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, int(S * 0.5)).x
+				draw_string(UI.font_bold, cc + Vector2(-ww / 2, S * 2.3), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, int(S * 0.5), UI.CYAN)
 
 	func _rocks(c: Vector2, S: float, h: Vector2i) -> void:
 		var r := RandomNumberGenerator.new()
@@ -257,6 +277,28 @@ class GridLayer extends Node2D:
 
 
 # ================================================================ pedine ed effetti
+
+## scie: linee che sbiadiscono dietro astronavi, caccia e missili
+class TrailLayer extends Node2D:
+	var board
+
+	func _draw() -> void:
+		var S: float = board.S
+		var now := Time.get_ticks_msec() / 1000.0
+		for id in board.trail.pts:
+			var arr: Array = board.trail.pts[id]
+			if arr.size() < 2:
+				continue
+			var col: Color = board.trail.color(id, board.eng)
+			var wid := S * (0.2 if board.trail.kind(id, board.eng) == "ship" else 0.11)
+			for i in range(1, arr.size()):
+				var a: Array = arr[i - 1]
+				var b: Array = arr[i]
+				var k := 1.0 - clampf((now - float(b[0])) / Trail.LIFE, 0.0, 1.0)
+				if k <= 0.0:
+					continue
+				draw_line(a[1] * S, b[1] * S, Color(col, 0.85 * k), wid * (0.35 + 0.65 * k))
+
 
 class UnitLayer extends Node2D:
 	var board

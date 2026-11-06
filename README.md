@@ -43,6 +43,16 @@ repository è pubblico).
   - Dietro gli ugelli c'è il getto dei motori, più lungo con la velocità e con la potenza (manovra) della
     nave; si spegne se il motore è distrutto. I missili hanno un getto arancione.
   - Il secondo lato ha lo scafo grigio-verde e le strisce verdi al posto di quelle rosse.
+- **Pianeti che girano**: il pianeta copre metà degli esagoni vicini (raggio 1,75 esagoni), gira su se stesso
+  con le nuvole, ha l'atmosfera che brilla sul bordo e una o due lune in orbita, in 2D e in 3D
+  (`scripts/ui/planets.gd`; texture generate da `tools/genera_pianeti.py`: Esata terrestre, Zaraznov
+  desertico, Kerberos gigante gassoso). In 3D le navi in orbita stanno sopra il pianeta.
+- **Scie** dietro astronavi, caccia e missili che si spengono in tre secondi, in partita e nel replay
+  (`scripts/ui/trail.gd`).
+- **Replay senza pause**: ogni unità si muove per tutto il turno alla sua velocità e il turno seguente
+  comincia subito; virate e scarti cadono al passaggio fra i turni (`tests/pianeta_shot.gd` controlla che
+  il moto non si fermi).
+- **Copertina**: nel menu la copertina cambia quando si sceglie il tabellone 3D.
 - **Opacità della griglia**: il cursore **Griglia** in alto regola la griglia di esagoni in 2D e in 3D; a zero
   restano solo i puntini al centro degli esagoni. La scelta resta salvata.
   - `tools/ottimizza_modelli.sh` rifà i modelli leggeri dagli originali (da 24-83 MB a circa 1 MB l'uno);
