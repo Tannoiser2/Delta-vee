@@ -104,6 +104,58 @@ func start_game(config: Dictionary) -> void:
 	current = g
 
 
+# ---------------------------------------------------------------- partita salvata
+
+const SAVE := "user://partita.json"
+const SAVE_KEYS := ["scenario", "seats", "max_turns", "ai_delay", "anim", "view3d", "seed"]
+
+
+## la partita salvata ({} se non c'è)
+func saved_game() -> Dictionary:
+	if not FileAccess.file_exists(SAVE):
+		return {}
+	var f := FileAccess.open(SAVE, FileAccess.READ)
+	if f == null:
+		return {}
+	var d = JSON.parse_string(f.get_as_text())
+	if not d is Dictionary or not d.has("cfg") or not d.has("dec"):
+		return {}
+	return d
+
+
+func save_game(cfg: Dictionary, eng: DVEngine) -> void:
+	var c := {}
+	for k in SAVE_KEYS:
+		if cfg.has(k):
+			c[k] = cfg[k]
+	var d := {"v": 1, "cfg": c, "dec": eng.dec_log, "turn": eng.turn, "scn": eng.scn,
+		"when": Time.get_datetime_string_from_system(false, true)}
+	var f := FileAccess.open(SAVE, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(d))
+		f.close()
+
+
+func delete_save() -> void:
+	if FileAccess.file_exists(SAVE):
+		DirAccess.remove_absolute(SAVE)
+
+
+func resume_game() -> void:
+	var d := saved_game()
+	if d.is_empty():
+		show_menu()
+		return
+	var cfg: Dictionary = d["cfg"].duplicate(true)
+	cfg["scenario"] = int(cfg.get("scenario", 0))
+	cfg["seed"] = int(cfg.get("seed", 1))
+	cfg["max_turns"] = int(cfg.get("max_turns", 40))
+	for st in cfg.get("seats", []):
+		st["level"] = int(st.get("level", 1))
+	cfg["dec"] = d["dec"]
+	start_game(cfg)
+
+
 func show_rules() -> void:
 	_clear()
 	var t := preload("res://scripts/ui/rules_view.gd").new()

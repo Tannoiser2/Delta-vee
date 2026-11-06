@@ -61,6 +61,19 @@ var guided_now := {}             # missili guidati con il comando di battaglia i
 var rdv_done := false
 var last_roll := 0
 var hit_txt: Array = []          # effetti dell'ultimo colpo, per la scritta sulla mappa
+## statistiche della partita, per lato (vedi STAT_KEYS) e per unità
+var stats: Array = [{}, {}]
+var ustats := {}
+var _atk := -1                   # lato che sta infliggendo il colpo in corso (-1 = nessuno, es. asteroidi)
+var _atk_u := ""                 # unità a cui va il merito del colpo in corso
+## salvataggio: decisioni prese finora (var_to_str) e decisioni da rigiocare per riprendere una partita
+var dec_log: Array = []
+var backlog: Array = []
+var resuming := false
+signal decided
+signal resumed
+
+const STAT_KEYS := ["fires", "hits", "crit", "dmg", "launched", "mhits", "mdown", "kills", "lost", "eu", "dist"]
 
 # registrazione per la vista e il replay
 var reg := {}                    # id -> {side, kind, cls, label}
@@ -80,6 +93,11 @@ func setup(cfg: Dictionary) -> void:
 	else:
 		rng.randomize()
 	max_turns = int(cfg.get("max_turns", 40))
+	for sd in 2:
+		for k in STAT_KEYS:
+			stats[sd][k] = 0
+	backlog = cfg.get("dec", []).duplicate()
+	resuming = not backlog.is_empty()
 	ai_delay = float(cfg.get("ai_delay", 0.6))
 	anim = float(cfg.get("anim", 1.0))
 	var letters: Array = sc["maps"]
@@ -321,6 +339,7 @@ func blocks_left(u: Dictionary) -> int:
 func spend_eu(u: Dictionary, n: int) -> void:
 	if u["kind"] == "ship":
 		u["spent"] = int(u["spent"]) + n
+		_st(u["side"], "eu", n)
 	else:
 		u["eu"] = maxi(0, int(u.get("eu", 0)) - n)
 
@@ -519,14 +538,43 @@ func decide(seat: int, req: Dictionary):
 		return ais[seat].decide(self, seat, req)
 	if online != null:
 		var r0 = await online.decide(self, seat, req)
-		return r0
+		# stessa forma su tutti i dispositivi (var_to_str ordina le chiavi dei dizionari)
+		return str_to_var(var_to_str(r0))
+	if not backlog.is_empty():
+		var sv: String = backlog.pop_front()
+		dec_log.append(sv)
+		if backlog.is_empty():
+			resuming = false
+			resumed.emit()
+		return str_to_var(sv)
+	var r
 	if players[seat]["ai"]:
 		if ai_delay > 0.0 and not headless and is_inside_tree() and req["type"] in ["cmd", "fire", "deploy"]:
 			await get_tree().create_timer(ai_delay).timeout
-		return ais[seat].decide(self, seat, req)
-	decision_requested.emit(req)
-	var r = await decision_provided
-	return r
+		r = ais[seat].decide(self, seat, req)
+	else:
+		decision_requested.emit(req)
+		r = await decision_provided
+	if abort:
+		return r
+	# la decisione passa sempre dalla sua forma salvata: così una partita ripresa è identica
+	var sv2 := var_to_str(r)
+	dec_log.append(sv2)
+	decided.emit()
+	return str_to_var(sv2)
+
+
+func _st(side: int, k: String, n := 1) -> void:
+	if side >= 0 and side < 2:
+		stats[side][k] = int(stats[side][k]) + n
+
+
+func _ust(id: String, k: String, n := 1) -> void:
+	if id == "" or not units.has(id):
+		return
+	if not ustats.has(id):
+		ustats[id] = {"fires": 0, "hits": 0, "dmg": 0, "kills": 0}
+	ustats[id][k] = int(ustats[id][k]) + n
 
 
 func provide_decision(r) -> void:
@@ -539,7 +587,7 @@ func log_msg(t: String) -> void:
 
 
 func _pace(sec: float) -> void:
-	if headless or anim <= 0.0 or abort or not is_inside_tree():
+	if headless or anim <= 0.0 or abort or resuming or not is_inside_tree():
 		return
 	if online != null and online.catchup:
 		return
@@ -795,6 +843,8 @@ func _move_unit(u: Dictionary) -> void:
 				break
 		await _intercepts_at(u, path.size() - 1)
 	_move_paths[u["id"]] = path
+	if u["kind"] != "mis":
+		_st(u["side"], "dist", path.size() - 1)
 	_drag_children(u)
 
 
@@ -904,6 +954,17 @@ func _intercept(m: Dictionary, t: Dictionary, step := -1) -> void:
 	log_msg("%s intercetta %s! (vel. relativa %d, %s)" % [uname(m), uname_for(t, m["side"]), rv, "automatico" if ch >= 99 else "dado %d, serviva %d o meno" % [roll, ch]])
 	m["st"] = "dead"
 	_ev({"k": "boom", "at": t["hex"], "a": m["id"], "t": t["id"], "step": step, "txt": "INTERCETTATO!"})
+	_st(m["side"], "mhits")
+	var pa := _atk
+	var pu := _atk_u
+	_atk = m["side"]
+	_atk_u = str(m.get("host", ""))
+	await _intercept_hit(m, t, step)
+	_atk = pa
+	_atk_u = pu
+
+
+func _intercept_hit(m: Dictionary, t: Dictionary, step: int) -> void:
 	if t["kind"] == "ship" and ff_class(t) > 0:
 		if not t["ffon"]:
 			# [9.8] attivazione d'emergenza del campo di forza
@@ -946,6 +1007,8 @@ func _apply_hit(t: Dictionary, roll: int, chooser: int, asteroid := false) -> vo
 			log_msg("Colpo (dado %d): %s è distrutto." % [roll, uname(t)])
 			hit_txt.append("MISSILE DISTRUTTO")
 			t["st"] = "dead"
+			if _atk >= 0 and _atk != t["side"]:
+				_st(_atk, "mdown")
 		else:
 			log_msg("Colpo (dado %d): il missile non ne risente." % roll)
 			hit_txt.append("nessun effetto")
@@ -963,6 +1026,8 @@ func _apply_hit(t: Dictionary, roll: int, chooser: int, asteroid := false) -> vo
 		opts = parts_of(t)
 		log_msg("Colpo critico (dado 1)!")
 		hit_txt.append("CRITICO!")
+		if _atk >= 0:
+			_st(_atk, "crit")
 	else:
 		var have := parts_of(t)
 		for p in D.HIT_TABLE[roll]:
@@ -987,6 +1052,9 @@ func _damage(t: Dictionary, part: String) -> void:
 	else:
 		t["parts"][part] = int(t["parts"].get(part, 0)) + 1
 	var after := part_state(t, part)
+	if after > before and _atk >= 0 and _atk != t["side"]:
+		_st(_atk, "dmg")
+		_ust(_atk_u, "dmg")
 	var word: String = ["intatto", "vulnerabile", "danneggiato", "distrutto"][after]
 	if before == after:
 		word = "già distrutto"
@@ -1035,6 +1103,11 @@ func _destroy(t: Dictionary, why: String) -> void:
 		return
 	t["st"] = "dead"
 	t["ffon"] = false
+	if t["kind"] != "mis":
+		_st(t["side"], "lost")
+		if _atk >= 0 and _atk != t["side"]:
+			_st(_atk, "kills")
+			_ust(_atk_u, "kills")
 	for c in _children(t):
 		c["st"] = "dead"
 	log_msg("%s è distrutto (%s)!" % [uname(t), why])
@@ -1574,6 +1647,8 @@ func _shoot(side: int, r: Dictionary) -> bool:
 		return false
 	_use_src(u, src)
 	spend_eu(u, cost)
+	_st(side, "fires")
+	_ust(u["id"], "fires")
 	var tv := target_value(u, src, t)
 	var ch := hit_chance(w, tv["tv"])
 	var srcname := "burster" if str(src) == "burst" else "modulo %d" % (int(src) + 1)
@@ -1594,8 +1669,14 @@ func _shoot(side: int, r: Dictionary) -> bool:
 	_rec({"k": "fire", "a": u["id"], "t": t["id"], "w": w, "hit": hit, "roll": roll, "need": ch})
 	await _pace(1.0)
 	if hit:
+		_st(side, "hits")
+		_ust(u["id"], "hits")
 		hit_txt = []
+		_atk = side
+		_atk_u = u["id"]
 		await _apply_hit(t, d10(), side)
+		_atk = -1
+		_atk_u = ""
 		if t["st"] == "dead":
 			_rec({"k": "boom", "at": t["hex"], "id": t["id"]})
 			_rec({"k": "dmg", "id": t["id"], "at": t["hex"], "txt": "DISTRUTTO!", "bad": true})
@@ -1690,6 +1771,7 @@ func _launch(side: int, r: Dictionary) -> bool:
 	m["rev"] = false
 	log_msg("%s lancia un %s (%s) in %s." % [uname(u), D.MNAME_FULL[m["cls"]].to_lower(), m["label"], hcode(h)])
 	_rec({"k": "launch", "a": u["id"], "id": m["id"]})
+	_st(side, "launched")
 	await _pace(0.5)
 	await _intercepts_at(m)
 	return true
@@ -1726,6 +1808,7 @@ func _mims(side: int, r: Dictionary) -> bool:
 		mm["v"] = int(p[2])
 		made.append(mm)
 	log_msg("Il MIMS %s si apre e lancia quattro missili non guidati!" % m["label"])
+	_st(side, "launched", 4)
 	_rec({"k": "launch", "a": m["id"], "id": made[0]["id"]})
 	await _pace(0.5)
 	for mm in made:

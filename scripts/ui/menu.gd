@@ -130,6 +130,10 @@ func _ready() -> void:
 		_store()
 		main.show_rules())
 	btns.add_child(rules)
+	var tut := UI.button("Tutorial", 180, 70, 24)
+	tut.pressed.connect(_on_tutorial)
+	btns.add_child(tut)
+	_resume_row(col)
 	msg = UI.label("", 20, UI.PINK)
 	col.add_child(msg)
 	_refresh()
@@ -248,6 +252,53 @@ func _config() -> Dictionary:
 	var anims := [0.6, 1.0, 1.8]
 	return {"scenario": scenario, "seats": seats, "ai_delay": delays[speed], "anim": anims[anim],
 		"view3d": view3d == 1, "max_turns": [20, 30, 40, 60][turns]}
+
+
+## partita salvata: si riprende da dove era rimasta
+func _resume_row(col: VBoxContainer) -> void:
+	var d: Dictionary = main.saved_game()
+	if d.is_empty():
+		return
+	var pc := PanelContainer.new()
+	var st := UI.panel_style(Color(0.05, 0.08, 0.18, 0.95), UI.YELLOW, 2, 6)
+	st.set_content_margin_all(10)
+	pc.add_theme_stylebox_override("panel", st)
+	pc.custom_minimum_size = Vector2(1160, 0)
+	col.add_child(pc)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 14)
+	pc.add_child(hb)
+	var cfg: Dictionary = d["cfg"]
+	var scn := clampi(int(d.get("scn", cfg.get("scenario", 0))), 0, D.SCENARIOS.size() - 1)
+	var who := []
+	for s in cfg.get("seats", []):
+		who.append(("IA %s" % ["facile", "normale", "difficile"][clampi(int(s.get("level", 1)), 0, 2)]) if s.get("ai", false) else str(s.get("name", "")))
+	var when := str(d.get("when", "")).replace("T", " ")
+	if when.length() >= 16:
+		when = "%s/%s alle %s" % [when.substr(8, 2), when.substr(5, 2), when.substr(11, 5)]
+	var info := VBoxContainer.new()
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hb.add_child(info)
+	info.add_child(UI.label("Partita in sospeso", 22, UI.YELLOW, UI.font_bold))
+	var l := UI.label("%d · %s, turno %d · %s · salvata il %s" % [scn + 1, D.SCENARIOS[scn]["name"], maxi(1, int(d.get("turn", 1))), " contro ".join(who), when], 18, UI.TEXT, UI.font_semi)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_child(l)
+	var go := UI.primary(UI.button("Riprendi", 180, 56, 22))
+	go.pressed.connect(func():
+		_store()
+		main.resume_game())
+	hb.add_child(go)
+	var del := UI.button("Elimina", 130, 56, 20)
+	del.pressed.connect(func():
+		main.delete_save()
+		pc.queue_free())
+	hb.add_child(del)
+
+
+func _on_tutorial() -> void:
+	_store()
+	main.start_game({"scenario": 0, "tutorial": true, "max_turns": 30, "ai_delay": 1.0, "anim": 0.8, "view3d": false,
+		"seats": [{"name": "I tagliagole", "ai": false, "level": 0}, {"name": "La guardia locale", "ai": true, "level": 0}]})
 
 
 func _on_start() -> void:

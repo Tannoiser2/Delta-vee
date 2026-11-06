@@ -75,6 +75,7 @@ func _follow(st: Dictionary, dt: float) -> void:
 var ended := false
 var hover_lbl: Label
 var _last_fire := {}
+var tutor: Tutor
 
 
 func _ready() -> void:
@@ -86,6 +87,9 @@ func _ready() -> void:
 		add_child(online)
 		online.view = self
 		engine.online = online
+	var saving: bool = online == null and not config.get("tutorial", false) and main != null
+	if saving and not config.has("seed"):
+		config["seed"] = randi()
 	engine.setup(config)
 	for s in 2:
 		var p: Dictionary = engine.players[s]
@@ -97,11 +101,17 @@ func _ready() -> void:
 			local_seats.append(s)
 	view3d = bool(config.get("view3d", false))
 	_build()
+	if engine.resuming:
+		status_lbl.text = "Riprendo la partita salvata…"
 	engine.changed.connect(_mark)
 	engine.log_added.connect(_on_log)
 	engine.decision_requested.connect(_on_decision)
 	engine.game_ended.connect(_on_end)
 	engine.fx.connect(_on_fx)
+	if saving:
+		engine.decided.connect(func(): main.save_game(config, engine))
+	if engine.resuming:
+		engine.resumed.connect(_on_resumed)
 	board2d.set_engine(engine)
 	board3d.set_engine(engine)
 	_apply_view()
@@ -109,6 +119,11 @@ func _ready() -> void:
 	_fit.call_deferred()
 	if online != null and online.role != "host":
 		online.heartbeat_loop()
+	if config.get("tutorial", false):
+		tutor = Tutor.new()
+		tutor.g = self
+		add_child(tutor)
+		tutor.event("start")
 	engine.run.call_deferred()
 
 
@@ -323,9 +338,20 @@ func _mark() -> void:
 		_wait_text = ""
 
 
+func _on_resumed() -> void:
+	status_lbl.text = "Partita ripresa dal turno %d." % engine.turn
+	live_dirty = true
+	_refresh()
+
+
 func _on_fx(kind: String, data: Dictionary) -> void:
-	if kind == "destroyed":
+	if kind == "destroyed" or engine.resuming:
 		return
+	if tutor != null:
+		if kind == "launch":
+			tutor.event("launch")
+		elif kind == "fire" and data.get("hit", false) and int(engine.reg.get(str(data.get("a", "")), {}).get("side", 0)) == 1:
+			tutor.event("hit_me")
 	anim_idx = engine.history.size() - 1
 	anim_t0 = Time.get_ticks_msec() / 1000.0
 	_seg_sound(data, 1.0 / maxf(0.1, engine.anim))
@@ -610,6 +636,8 @@ func _on_decision(req: Dictionary) -> void:
 	_build_decision()
 	_card()
 	_redraw_all()
+	if tutor != null:
+		tutor.event("dec_" + str(req["type"]))
 
 
 func _submit(r) -> void:
@@ -1447,8 +1475,13 @@ func _on_end(res: Dictionary) -> void:
 		online.finish()
 	if engine.abort:
 		return
+	if online == null and main != null and not config.get("tutorial", false):
+		main.delete_save()
 	_refresh()
 	_end_panel(res)
+	if tutor != null:
+		move_child(tutor, -1)
+		tutor.event("end")
 
 
 var end_panel: Control
@@ -1458,13 +1491,15 @@ func _end_panel(res: Dictionary) -> void:
 	end_panel.color = Color(0, 0, 0, 0.72)
 	end_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(end_panel)
+	var cc := CenterContainer.new()
+	cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	end_panel.add_child(cc)
 	var pc := PanelContainer.new()
 	pc.add_theme_stylebox_override("panel", UI.dark_style(10, 0.98))
 	pc.custom_minimum_size = Vector2(980, 0)
-	pc.position = Vector2(get_viewport_rect().size.x / 2 - 490, 170)
-	end_panel.add_child(pc)
+	cc.add_child(pc)
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 16)
+	vb.add_theme_constant_override("separation", 12)
 	pc.add_child(vb)
 	var w := int(res.get("winner", -1))
 	var t := UI.title("Pareggio" if w < 0 else "Vince %s" % engine.pname(w), 56, UI.YELLOW if w < 0 else UI.SIDE[w])
@@ -1481,6 +1516,7 @@ func _end_panel(res: Dictionary) -> void:
 	var il := UI.label(info, 22, UI.CYAN, UI.font_mono)
 	il.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(il)
+	_stats_box(vb)
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 14)
@@ -1496,6 +1532,104 @@ func _end_panel(res: Dictionary) -> void:
 	menu.pressed.connect(func(): main.show_menu())
 	row.add_child(menu)
 	vb.add_child(row)
+
+
+const STAT_ROWS := [
+	["Colpi sparati", "fires"], ["Colpi a segno", "hits"], ["Colpi critici", "crit"],
+	["Parti nemiche danneggiate", "dmg"], ["Missili lanciati", "launched"],
+	["Intercettazioni riuscite", "mhits"], ["Missili nemici abbattuti", "mdown"],
+	["Unità nemiche distrutte", "kills"], ["Unità perdute", "lost"],
+	["Energia spesa (unità)", "eu"], ["Esagoni percorsi", "dist"],
+]
+
+
+## statistiche della partita: un confronto a barre fra i due lati e le unità migliori
+func _stats_box(vb: VBoxContainer) -> void:
+	vb.add_child(HSeparator.new())
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 8)
+	head.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_child(head)
+	for s in 2:
+		var l := UI.label(engine.pname(s), 24, UI.SIDE[s], UI.font_bold)
+		l.custom_minimum_size.x = 358
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if s == 0 else HORIZONTAL_ALIGNMENT_LEFT
+		l.clip_text = true
+		head.add_child(l)
+		if s == 0:
+			var mid := UI.label("contro", 18, UI.MUTED, UI.font_semi)
+			mid.custom_minimum_size.x = 250
+			mid.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			head.add_child(mid)
+	var st: Array = engine.stats
+	var grid := VBoxContainer.new()
+	grid.add_theme_constant_override("separation", 4)
+	vb.add_child(grid)
+	for rw in STAT_ROWS:
+		var k: String = rw[1]
+		var a := int(st[0].get(k, 0))
+		var b := int(st[1].get(k, 0))
+		if a == 0 and b == 0 and not k in ["fires", "hits"]:
+			continue
+		var r := HBoxContainer.new()
+		r.add_theme_constant_override("separation", 8)
+		r.alignment = BoxContainer.ALIGNMENT_CENTER
+		grid.add_child(r)
+		var mx := float(maxi(1, maxi(a, b)))
+		for s in 2:
+			var v := a if s == 0 else b
+			var txt := str(v)
+			if k == "hits" and int(st[s]["fires"]) > 0:
+				txt = "%d (%d%%)" % [v, roundi(100.0 * v / int(st[s]["fires"]))]
+			var vl := UI.label(txt, 19, UI.TEXT, UI.font_mono)
+			vl.custom_minimum_size.x = 120
+			vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if s == 0 else HORIZONTAL_ALIGNMENT_LEFT
+			var bar := Control.new()
+			bar.custom_minimum_size = Vector2(230, 26)
+			var fill := ColorRect.new()
+			fill.color = Color(UI.SIDE[s], 0.85)
+			var wpx := 230.0 * v / mx
+			fill.size = Vector2(wpx, 16)
+			fill.position = Vector2(230.0 - wpx if s == 0 else 0.0, 5)
+			bar.add_child(fill)
+			if s == 0:
+				r.add_child(vl)
+				r.add_child(bar)
+				var nl := UI.label(rw[0], 18, UI.CYAN, UI.font_semi)
+				nl.custom_minimum_size.x = 250
+				nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				r.add_child(nl)
+			else:
+				r.add_child(bar)
+				r.add_child(vl)
+	# le unità migliori
+	var best := ["", ""]
+	var bscore := [0, 0]
+	for id in engine.ustats:
+		var us: Dictionary = engine.ustats[id]
+		var sd := int(engine.reg[id]["side"])
+		var sc := int(us["dmg"]) * 2 + int(us["kills"]) * 6 + int(us["hits"])
+		if sc > bscore[sd]:
+			bscore[sd] = sc
+			best[sd] = id
+	var bl := HBoxContainer.new()
+	bl.add_theme_constant_override("separation", 20)
+	bl.alignment = BoxContainer.ALIGNMENT_CENTER
+	for s in 2:
+		if best[s] == "":
+			continue
+		var us: Dictionary = engine.ustats[best[s]]
+		var u: Dictionary = engine.units[best[s]]
+		var t := "Migliore: %s, %d colpi a segno su %d, %d parti danneggiate%s" % [engine.uname(u), us["hits"], us["fires"], us["dmg"],
+			(", %d unità distrutte" % us["kills"]) if int(us["kills"]) > 1 else (", 1 unità distrutta" if int(us["kills"]) == 1 else "")]
+		var l := UI.label(t, 17, UI.SIDE[s], UI.font_semi)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size.x = 450
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if s == 0 else HORIZONTAL_ALIGNMENT_LEFT
+		bl.add_child(l)
+	if bl.get_child_count() > 0:
+		vb.add_child(bl)
+	vb.add_child(HSeparator.new())
 
 
 func start_replay() -> void:
@@ -1641,7 +1775,14 @@ func _replay_step(dt: float) -> void:
 
 func _confirm_menu() -> void:
 	var dlg := ConfirmationDialog.new()
-	dlg.dialog_text = "Tornare al menu? La partita in corso andrà persa." if not ended else "Tornare al menu?"
+	dlg.dialog_text = "Tornare al menu?"
+	if not ended:
+		if online != null:
+			dlg.dialog_text = "Tornare al menu? Potrai rientrare nella partita online con il suo codice."
+		elif config.get("tutorial", false):
+			dlg.dialog_text = "Uscire dal tutorial?"
+		else:
+			dlg.dialog_text = "Tornare al menu? La partita resta salvata: potrai riprenderla dal menu."
 	dlg.ok_button_text = "Sì, al menu"
 	dlg.cancel_button_text = "Annulla"
 	add_child(dlg)
