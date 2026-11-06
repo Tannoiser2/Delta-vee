@@ -1,7 +1,7 @@
 extends SceneTree
 ## Prova del gioco online: due istanze (chi crea la stanza è il Giocatore 1, l'amico il Giocatore 2)
 ## giocano una partita intera sul finto Firebase (tests/firebase_mock.py), con le decisioni prese dall'IA.
-## DV_ROLE=host|guest, DV_CODEFILE=file per il codice della stanza, DV_SCN=scenario (1-5).
+## DV_ROLE=host|guest, DV_CODEFILE=file per il codice della stanza, DV_SCN=scenario (1-6; 6 = battaglia libera del cantiere).
 ## Alla fine ognuno stampa l'impronta della partita: devono coincidere.
 
 var main

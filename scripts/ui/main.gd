@@ -1,5 +1,7 @@
 extends Control
-## Radice dell'applicazione: alterna menu, partita e regole.
+## Radice dell'applicazione: alterna menu, partita, regole e cantiere navale.
+
+const D = preload("res://scripts/data/dv_data.gd")
 
 var current: Control
 ## Collegamento a Firebase per il gioco online (resta vivo fra menu e partita).
@@ -117,7 +119,7 @@ func start_game(config: Dictionary) -> void:
 # ---------------------------------------------------------------- partita salvata
 
 const SAVE := "user://partita.json"
-const SAVE_KEYS := ["scenario", "seats", "max_turns", "ai_delay", "anim", "view3d", "seed"]
+const SAVE_KEYS := ["scenario", "seats", "max_turns", "ai_delay", "anim", "view3d", "seed", "custom"]
 
 
 ## la partita salvata ({} se non c'è)
@@ -164,6 +166,39 @@ func resume_game() -> void:
 		st["level"] = int(st.get("level", 1))
 	cfg["dec"] = d["dec"]
 	start_game(cfg)
+
+
+# ---------------------------------------------------------------- cantiere navale
+
+const YARD := "user://cantiere.json"
+var _yard := {}
+
+
+## flotte della battaglia libera (si salvano a ogni modifica)
+func yard() -> Dictionary:
+	if _yard.is_empty():
+		_yard = D.yard_default()
+		if FileAccess.file_exists(YARD):
+			var f := FileAccess.open(YARD, FileAccess.READ)
+			var d = JSON.parse_string(f.get_as_text()) if f != null else null
+			if d is Dictionary and d.has("fleets") and d["fleets"] is Array and d["fleets"].size() == 2:
+				_yard = d
+	return _yard
+
+
+func save_yard() -> void:
+	var f := FileAccess.open(YARD, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(_yard))
+		f.close()
+
+
+func show_shipyard() -> void:
+	_clear()
+	var t := preload("res://scripts/ui/shipyard.gd").new()
+	t.main = self
+	add_child(t)
+	current = t
 
 
 func show_rules() -> void:

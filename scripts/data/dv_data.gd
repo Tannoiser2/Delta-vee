@@ -253,3 +253,108 @@ const SCENARIOS := [
 ]
 
 const DIR_NAMES := ["12", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+
+
+# ================================================================ cantiere navale (battaglia libera)
+# Il regolamento non prevede la costruzione delle flotte: questi punti sono un aiuto per bilanciare le
+# battaglie inventate, ricavati dai valori delle tabelle 4.9 e 5.8.
+
+const CUSTOM := 5                # indice della battaglia libera fra gli scenari
+
+## moduli che si possono montare nel cantiere, in ordine di importanza
+const YARD_PODS := ["light", "heavy", "arsenal", "hunter", "bcomm", "bcpod", "energy", "tractor",
+	"jump", "ajump", "crew", "cargo", "bcargo", "cabin", "support", "equip"]
+
+const POD_PTS := {"hunter": 14, "light": 10, "heavy": 16, "arsenal": 24, "bcomm": 8, "tractor": 8,
+	"bcpod": 6, "jump": 1, "ajump": 2, "energy": 8}
+
+## posizione di partenza: colonna sulla mappa A (lato 1) e sulla mappa B (lato 2) per distanza vicina/media/lontana
+const YARD_COLS := [[10, 7], [5, 12], [2, 15]]
+const YARD_ROWS := [9, 6, 12, 3, 15, 18]
+const YARD_MAX := 6
+const YARD_BUDGETS := [0, 100, 200, 300]
+
+
+static func hull_pts(cls: String) -> int:
+	var s: Dictionary = SHIPS[cls]
+	return roundi(float(s["cap"]) / 16.0 + s["mr"] * 0.8 + s["vr"] * 2.0 + s["burst"] * 3.0 + s["armor"] * 3.0 + s["ff"] * 5.0 + (s["civ"] - 6) * 2.0)
+
+
+## punti di un modulo [tipo, corazza, extra] (extra: caccia "TX"/"T5000" per l'hangar, civiltà del raggio traente)
+static func pod_pts(pd: Array) -> int:
+	var t: String = pd[0]
+	var p := int(POD_PTS.get(t, 1))
+	var ar := int(pd[1]) if pd.size() > 1 else 0
+	p += ar * (2 if PODS[t]["lp"] else 1)
+	if t == "bcpod":
+		p += roundi(hull_pts(str(pd[2]) if pd.size() > 2 else "TX") * 0.6)
+	if t == "tractor" and pd.size() > 2 and int(pd[2]) >= 8:
+		p += 2
+	return p
+
+
+static func ship_pts(spec: Dictionary) -> int:
+	var p := hull_pts(spec["cls"])
+	for pd in spec["pods"]:
+		p += pod_pts(pd)
+	return p
+
+
+static func fleet_pts(fleet: Array) -> int:
+	var p := 0
+	for s in fleet:
+		p += ship_pts(s)
+	return p
+
+
+## dotazione proposta per una classe: armi, energia e comandi in proporzione ai moduli
+static func default_pods(cls: String) -> Array:
+	var seq := ["light", "energy", "heavy", "bcomm", "bcpod", "light", "crew", "arsenal", "energy", "heavy", "bcpod", "cargo"]
+	var out := []
+	for i in int(SHIPS[cls]["pods"]):
+		var t: String = seq[i]
+		if t == "bcpod":
+			out.append([t, 1, "TX"])
+		else:
+			out.append([t, 2 if PODS[t]["lp"] else 1])
+	return out
+
+
+static func yard_default() -> Dictionary:
+	return {"sides": ["Flotta arancione", "Flotta verde"], "terrain": 0, "dist": 1, "v": 2, "budget": 2,
+		"fleets": [
+			[{"cls": "Sword", "pods": default_pods("Sword")}, {"cls": "Dagger", "pods": default_pods("Dagger")}],
+			[{"cls": "Clarinet", "pods": default_pods("Clarinet")}, {"cls": "Piccolo", "pods": default_pods("Piccolo")}]]}
+
+
+## scenario completo della battaglia libera, dai dati del cantiere
+static func custom_scenario(y: Dictionary) -> Dictionary:
+	var cols: Array = YARD_COLS[clampi(int(y.get("dist", 1)), 0, 2)]
+	var forces := [[], []]
+	var ids := "ABCDEF"
+	for side in 2:
+		var fl: Array = y["fleets"][side]
+		for i in mini(fl.size(), YARD_MAX):
+			var f: Dictionary = fl[i]
+			var pods := []
+			for pd in f["pods"]:
+				var q := [str(pd[0]), int(pd[1])]
+				if pd.size() > 2:
+					q.append(pd[2] if str(pd[0]) == "bcpod" else int(pd[2]))
+				pods.append(q)
+			forces[side].append({"id": ids[i], "cls": str(f["cls"]), "pods": pods,
+				"hex": "%s%02d%02d" % ["A" if side == 0 else "B", cols[side], YARD_ROWS[i]],
+				"dir": 3 if side == 0 else 9, "v": clampi(int(y.get("v", 2)), 0, 5)})
+	var sides: Array = y.get("sides", ["Flotta arancione", "Flotta verde"])
+	var sc := {"name": "Battaglia libera", "orig": "Cantiere navale", "custom": true,
+		"text": "Due flotte costruite nel cantiere navale si affrontano in campo aperto. Il regolamento non prevede la costruzione delle flotte: i punti sono un aiuto per bilanciarle.",
+		"maps": ["A", "B"], "sides": [str(sides[0]), str(sides[1])],
+		"win": "Vince chi distrugge tutte le navi nemiche; altrimenti, a fine partita, chi ha più punti (navi e moduli nemici distrutti).",
+		"forces": forces}
+	match int(y.get("terrain", 0)):
+		1:
+			sc["planet"] = ["A1609"]
+			sc["planet_name"] = "Kerberos"
+		2:
+			sc["asteroids"] = ["A1606", "A1612", "B0109"]
+	return sc

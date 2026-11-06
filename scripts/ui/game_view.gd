@@ -489,7 +489,7 @@ func _refresh_labels() -> void:
 	var ph: String = {"setup": "Schieramento", "move": "Movimento", "cmd": "Comando", "fire": "Fuoco", "over": "Partita finita"}.get(engine.phase, "")
 	var who := engine.pname(engine.phasing)
 	phase_lbl.text = "Turno %d  ·  %s  ·  %s" % [maxi(1, engine.turn), ph, who] if engine.phase != "over" else "Partita finita"
-	if engine.scn == 4:
+	if engine.scn in [4, D.CUSTOM]:
 		phase_lbl.text += "   ·   Punti %d – %d" % [engine.vp[0], engine.vp[1]]
 	phase_lbl.add_theme_color_override("font_color", UI.SIDE[engine.phasing] if engine.phase != "over" else UI.YELLOW)
 
@@ -1623,6 +1623,8 @@ func _end_panel(res: Dictionary) -> void:
 	var info := "Turni giocati: %d" % engine.turn
 	if engine.scn == 4:
 		info += "   ·   Punti: convoglio %d, insorti %d" % [engine.vp[0], engine.vp[1]]
+	elif engine.scn == D.CUSTOM:
+		info += "   ·   Punti: %s %d, %s %d" % [engine.sc["sides"][0], engine.vp[0], engine.sc["sides"][1], engine.vp[1]]
 	var il := UI.label(info, 22, UI.CYAN, UI.font_mono)
 	il.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(il)

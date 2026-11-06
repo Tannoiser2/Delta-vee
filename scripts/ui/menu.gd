@@ -68,10 +68,10 @@ func _ready() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	col.add_child(row)
-	var stars := ["Piccolo", "Sword", "Iota", "Mu", "Spear"]
-	for i in D.SCENARIOS.size():
-		var sc: Dictionary = D.SCENARIOS[i]
-		var b := UI.button("%d · %s" % [i + 1, sc["name"]], 222, 118, 19)
+	var stars := ["Piccolo", "Sword", "Iota", "Mu", "Spear", "Clarinet"]
+	for i in D.SCENARIOS.size() + 1:
+		var nm: String = D.SCENARIOS[i]["name"] if i < D.SCENARIOS.size() else "Battaglia libera"
+		var b := UI.button("%d · %s" % [i + 1, nm], 184, 118, 18)
 		b.icon = UI.tex("res://assets/ships_alt/%s.webp" % stars[i])
 		b.expand_icon = true
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -162,10 +162,14 @@ func _refresh() -> void:
 			for k in ["font_color", "font_hover_color", "font_pressed_color"]:
 				b.remove_theme_color_override(k)
 			b.remove_theme_font_override("font")
-	var sc: Dictionary = D.SCENARIOS[scenario]
+	var sc: Dictionary = _sc()
 	var t := "[font_size=30][color=#f4e46a]%s[/color][/font_size]   [color=#9b9384](%s)[/color]\n" % [sc["name"], sc["orig"]]
 	t += sc["text"] + "\n"
-	t += "[color=%s][b]%s[/b][/color]  contro  [color=%s][b]%s[/b][/color]\n" % [UI.SIDE[0].to_html(false), sc["sides"][0], UI.SIDE[1].to_html(false), sc["sides"][1]]
+	t += "[color=%s][b]%s[/b][/color]  contro  [color=%s][b]%s[/b][/color]" % [UI.SIDE[0].to_html(false), sc["sides"][0], UI.SIDE[1].to_html(false), sc["sides"][1]]
+	if scenario == D.CUSTOM:
+		var y: Dictionary = main.yard()
+		t += "   [color=#f4e46a](punti %d contro %d)[/color]" % [D.fleet_pts(y["fleets"][0]), D.fleet_pts(y["fleets"][1])]
+	t += "\n"
 	t += "[color=#8fd3f4][b]Vittoria:[/b] %s[/color]" % sc["win"]
 	sc_text.text = t
 	# le navi dello scenario con le loro illustrazioni
@@ -175,7 +179,9 @@ func _refresh() -> void:
 	for side in 2:
 		for f in sc["forces"][side]:
 			n += 1
-	var tw := minf(220.0, (1130.0 - 8 * (n - 1)) / n)
+	var tw := minf(220.0, (1130.0 - 8 * (n - 1)) / maxi(1, n))
+	if scenario == D.CUSTOM:
+		tw = minf(tw, (1130.0 - 8 * n - 190.0) / maxi(1, n))
 	for side in 2:
 		for f in sc["forces"][side]:
 			var pc := PanelContainer.new()
@@ -186,7 +192,8 @@ func _refresh() -> void:
 			v.add_theme_constant_override("separation", 0)
 			pc.add_child(v)
 			var img := TextureRect.new()
-			img.texture = UI.tex("res://assets/ships_alt/%s.webp" % f["cls"])
+			var alt := "res://assets/ships_alt/%s.webp" % f["cls"]
+			img.texture = UI.tex(alt) if ResourceLoader.exists(alt) else ShipCard.ship_img(f["cls"])
 			img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 			img.custom_minimum_size = Vector2(tw - 6, (tw - 6) * 0.36)
@@ -197,6 +204,12 @@ func _refresh() -> void:
 			l.custom_minimum_size.x = tw - 8
 			v.add_child(l)
 			sc_ships.add_child(pc)
+	if scenario == D.CUSTOM:
+		var yb := UI.primary(UI.button("Cantiere navale", 180, 72, 20))
+		yb.pressed.connect(func():
+			_store()
+			main.show_shipyard())
+		sc_ships.add_child(yb)
 	for s in 2:
 		var r: HBoxContainer = seat_rows[s]
 		for c in r.get_children():
@@ -240,9 +253,16 @@ func _segmented(label_text: String, items: Array, cur: int, cb: Callable, w := 1
 	return h
 
 
+## scenario scelto (la battaglia libera si costruisce dai dati del cantiere)
+func _sc() -> Dictionary:
+	if scenario == D.CUSTOM:
+		return D.custom_scenario(main.yard())
+	return D.SCENARIOS[scenario]
+
+
 func _config() -> Dictionary:
 	var seats := []
-	var sc: Dictionary = D.SCENARIOS[scenario]
+	var sc: Dictionary = _sc()
 	for s in 2:
 		var nm: String = names[s].strip_edges()
 		if nm == "":
@@ -250,8 +270,11 @@ func _config() -> Dictionary:
 		seats.append({"name": nm, "ai": modes[s] != 0, "level": maxi(0, modes[s] - 1)})
 	var delays := [1.4, 0.7, 0.25, 0.0]
 	var anims := [0.6, 1.0, 1.8]
-	return {"scenario": scenario, "seats": seats, "ai_delay": delays[speed], "anim": anims[anim],
+	var cfg := {"scenario": scenario, "seats": seats, "ai_delay": delays[speed], "anim": anims[anim],
 		"view3d": view3d == 1, "max_turns": [20, 30, 40, 60][turns]}
+	if scenario == D.CUSTOM:
+		cfg["custom"] = sc
+	return cfg
 
 
 ## partita salvata: si riprende da dove era rimasta
@@ -269,7 +292,7 @@ func _resume_row(col: VBoxContainer) -> void:
 	hb.add_theme_constant_override("separation", 14)
 	pc.add_child(hb)
 	var cfg: Dictionary = d["cfg"]
-	var scn := clampi(int(d.get("scn", cfg.get("scenario", 0))), 0, D.SCENARIOS.size() - 1)
+	var scn := clampi(int(d.get("scn", cfg.get("scenario", 0))), 0, D.CUSTOM)
 	var who := []
 	for s in cfg.get("seats", []):
 		who.append(("IA %s" % ["facile", "normale", "difficile"][clampi(int(s.get("level", 1)), 0, 2)]) if s.get("ai", false) else str(s.get("name", "")))
@@ -280,7 +303,7 @@ func _resume_row(col: VBoxContainer) -> void:
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(info)
 	info.add_child(UI.label("Partita in sospeso", 22, UI.YELLOW, UI.font_bold))
-	var l := UI.label("%d · %s, turno %d · %s · salvata il %s" % [scn + 1, D.SCENARIOS[scn]["name"], maxi(1, int(d.get("turn", 1))), " contro ".join(who), when], 18, UI.TEXT, UI.font_semi)
+	var l := UI.label("%d · %s, turno %d · %s · salvata il %s" % [scn + 1, "Battaglia libera" if scn == D.CUSTOM else D.SCENARIOS[scn]["name"], maxi(1, int(d.get("turn", 1))), " contro ".join(who), when], 18, UI.TEXT, UI.font_semi)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info.add_child(l)
 	var go := UI.primary(UI.button("Riprendi", 180, 56, 22))
@@ -345,7 +368,7 @@ func _online_panel() -> void:
 	on_name = _line("Il tuo nome", 20)
 	on_name.text = str(ses.get("name", ""))
 	vb.add_child(on_name)
-	var sc: Dictionary = D.SCENARIOS[scenario]
+	var sc: Dictionary = _sc()
 	vb.add_child(_segmented("Tu giochi", [sc["sides"][0], sc["sides"][1]], host_side, func(k): host_side = k, 300))
 	var b_create := UI.button("Crea una stanza", 0, 56, 22)
 	b_create.pressed.connect(_online_create)
@@ -385,7 +408,7 @@ func _online_panel() -> void:
 
 
 func _seat_names() -> Array:
-	var sc: Dictionary = D.SCENARIOS[scenario]
+	var sc: Dictionary = _sc()
 	return [sc["sides"][0], sc["sides"][1]]
 
 

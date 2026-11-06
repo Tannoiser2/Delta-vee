@@ -76,6 +76,17 @@ repository è pubblico).
   posizione e l'energia; sotto, le schede **Ordini** (comandi della fase), **Caratteristiche** (valori e
   scafo) e **Moduli** (i moduli con le loro immagini; un tocco ne mostra la descrizione). I pulsanti di
   fine fase restano sempre in fondo e nessuna scheda deve scorrere (`tests/pannello_shot.gd` lo controlla).
+- **Battaglia libera e cantiere navale** (sesto scenario): il regolamento non prevede la costruzione delle
+  flotte (le navi e i moduli sono sempre fissati dagli scenari), quindi il **Cantiere navale** è un'aggiunta:
+  - si scelgono fino a 6 astronavi per lato fra le 12 classi, e per ogni nave i moduli (armi leggere, pesanti,
+    arsenale, cacciatore, comunicazioni, hangar con Terwillicker-X o 5000, energia, raggio traente, salto,
+    equipaggio, stive...), la corazza di ciascuno e il nome della flotta;
+  - punti per bilanciare (scafo dai valori della tabella 4.9, moduli secondo armi, missili e corazza), con un
+    tetto facoltativo di 100, 200 o 300 punti e la flotta casuale entro il tetto;
+  - terreno (spazio aperto, pianeta, asteroidi), distanza e velocità di partenza;
+  - vince chi distrugge tutte le navi nemiche; altrimenti, a fine partita, chi ha più punti (navi e moduli
+    nemici distrutti). Si gioca anche online e si salva come le altre partite (`scripts/ui/shipyard.gd`,
+    `tests/libera_sim.gd`, `tests/cantiere_shot.gd`).
 - **Tutorial** guidato sul primo scenario (pulsante **Tutorial** nel menu): spiega pedine, movimento
   newtoniano, fase di comando, fase di fuoco, missili e danni man mano che capitano, e mette in evidenza
   i pulsanti da usare (`scripts/ui/tutor.gd`).

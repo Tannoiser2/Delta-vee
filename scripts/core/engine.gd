@@ -94,7 +94,11 @@ var _move_ev: Array = []
 
 func setup(cfg: Dictionary) -> void:
 	scn = int(cfg.get("scenario", 0))
-	sc = D.SCENARIOS[scn]
+	if cfg.has("custom"):
+		scn = D.CUSTOM
+		sc = cfg["custom"]
+	else:
+		sc = D.SCENARIOS[scn]
 	players = cfg.get("seats", [{"name": "", "ai": false, "level": 1}, {"name": "", "ai": true, "level": 1}])
 	if cfg.has("seed"):
 		rng.seed = int(cfg["seed"])
@@ -1885,6 +1889,29 @@ func _check_victory() -> void:
 				_win(0, "il Corco Mu è in orbita attorno a Esata.")
 			elif s1[0]["st"] == "dead" and s1[1]["st"] == "dead":
 				_win(0, "entrambi i Flute pirati sono distrutti.")
+		D.CUSTOM:
+			# battaglia libera: punti per le navi e i moduli nemici distrutti
+			for side in 2:
+				var pts := 0
+				for u in (s1 if side == 0 else s0):
+					if u["st"] == "dead":
+						pts += D.ship_pts(u["spec"])
+					else:
+						for i in u["pods"].size():
+							if pod_state(u, i) == 3:
+								pts += D.pod_pts(u["spec"]["pods"][i])
+				vp[side] = pts
+			var alive := [0, 0]
+			for side in 2:
+				for u in (s0 if side == 0 else s1):
+					if u["st"] != "dead":
+						alive[side] += 1
+			if alive[0] == 0 and alive[1] == 0:
+				_win(-1, "le due flotte si sono distrutte a vicenda.")
+			elif alive[1] == 0:
+				_win(0, "tutte le astronavi di %s sono distrutte." % sc["sides"][1])
+			elif alive[0] == 0:
+				_win(1, "tutte le astronavi di %s sono distrutte." % sc["sides"][0])
 		4:
 			for u in s0:
 				if u["st"] == "on" and is_planet(u["hex"]) and int(u["v"]) == 1:
@@ -1969,17 +1996,20 @@ func _end_turn_checks() -> void:
 	_calm_dist = md
 	if apart >= CALM_TURNS or calm >= CALM_MAX:
 		var w0 := -1
-		if scn == 4 and vp[0] != vp[1]:
+		if scn in [4, D.CUSTOM] and vp[0] != vp[1]:
 			w0 = 0 if vp[0] > vp[1] else 1
 		var why := "le flotte si sono separate: nessun colpo a segno da %d turni e più di %d esagoni fra le navi nemiche più vicine." % [CALM_TURNS, CALM_DIST]
 		if apart < CALM_TURNS:
 			why = "stallo: nessun colpo a segno da %d turni (navi alla deriva o fuori portata)." % CALM_MAX
-		if scn == 4:
+		if scn in [4, D.CUSTOM]:
 			why += " Punti %d a %d." % [vp[0], vp[1]]
 		_win(w0, why)
 		return
 	if turn >= max_turns:
 		var w := -1
-		if scn == 4 and vp[0] != vp[1]:
+		if scn in [4, D.CUSTOM] and vp[0] != vp[1]:
 			w = 0 if vp[0] > vp[1] else 1
-		_win(w, "raggiunto il limite di %d turni." % max_turns)
+		var r2 := "raggiunto il limite di %d turni." % max_turns
+		if scn == D.CUSTOM:
+			r2 += " Punti %d a %d." % [vp[0], vp[1]]
+		_win(w, r2)
